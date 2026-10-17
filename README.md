@@ -42,7 +42,7 @@ Supabase's built-in email sender only sends a few emails per hour, which is fine
 What a push does, for that one person:
 - Their list becomes exactly the tasks assigned to them in ProTracker (Repo excluded), in ProTracker's order, with subtasks right after their parent.
 - New tasks are added; existing ones take any new name and tags. Ticks they made are kept.
-- Tags show as coloured chips, with a tag filter above the list, just like in ProTracker.
+- Tags show as coloured chips on each task, and a Tags column on the left (like ProTracker's Tree view) shows one tag's tasks at a time.
 - Tasks no longer assigned to them are removed.
 
 ## Who can do what

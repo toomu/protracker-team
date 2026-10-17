@@ -107,16 +107,19 @@
   details.paste summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
   details.paste[open] summary { margin-bottom: 8px; }
 
-  /* People down the left (owner only), the chosen person's list on the right */
+  /* Down the left: People (owner only) and the shown person's Tags; their tasks for the chosen tag on the right */
   .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 20px; align-items: start; }
-  .layout.solo { grid-template-columns: minmax(0, 1fr); }
   .side {
     position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); max-height: calc(100vh - 24px); overflow-y: auto;
     background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; display: grid; gap: 2px;
   }
   .side h2 { margin: 6px 10px 4px; color: var(--muted); font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
   .side .hint { padding: 4px 10px 8px; }
-  #people-items { display: contents; }
+  .side-group { display: grid; gap: 2px; }
+  #people-group:not([hidden]) + #tags-group { margin-top: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+  #people-items, #tag-items { display: contents; }
+  .tag-item .dot { flex: none; width: 10px; height: 10px; margin-inline: 9px; border-radius: 50%; background: var(--c); }
+  .tag-item { min-height: 44px; }
   .person-item {
     --c: var(--muted);
     font: inherit; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; cursor: pointer;
@@ -168,8 +171,6 @@
   .chip .n { font-weight: 400; opacity: 0.75; font-variant-numeric: tabular-nums; }
   .chip:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
   .task.done .chip { opacity: 0.6; }
-  .tag-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  .tag-filter .label { color: var(--muted); font-size: 0.85rem; margin-right: 2px; }
   li.group-head {
     padding: 10px 14px; border-top: 1px solid var(--line); background: var(--paper); color: var(--muted);
     font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
@@ -178,7 +179,9 @@
   .empty strong { color: var(--ink); font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; }
   @media (max-width: 720px) {
     .layout { grid-template-columns: 1fr; }
-    .side { position: static; display: flex; gap: 6px; overflow-x: auto; max-height: none; }
+    .side { position: static; max-height: none; gap: 6px; }
+    .side-group { display: flex; gap: 6px; overflow-x: auto; }
+    #people-group:not([hidden]) + #tags-group { margin-top: 0; }
     .side h2, .side .hint { display: none; }
     .person-item { width: auto; flex: none; white-space: nowrap; }
     .person-item .email { display: none; }
@@ -234,9 +237,15 @@
   </section>
 
   <section class="layout" id="app" hidden>
-    <nav class="side" id="side" aria-label="People" hidden>
-      <h2>People</h2>
-      <div id="people-items"></div>
+    <nav class="side" id="side" aria-label="People and tags">
+      <div class="side-group" id="people-group" hidden>
+        <h2>People</h2>
+        <div id="people-items"></div>
+      </div>
+      <div class="side-group" id="tags-group">
+        <h2>Tags</h2>
+        <div id="tag-items"></div>
+      </div>
     </nav>
     <section class="main" aria-labelledby="list-title">
       <div class="section-head">
@@ -244,7 +253,6 @@
         <span class="sub" id="list-sub"></span>
       </div>
       <div class="progress" id="progress" role="progressbar" aria-label="Tasks done" aria-valuemin="0" aria-valuemax="100" hidden><div class="progress-fill" id="progress-fill"></div></div>
-      <div class="tag-filter" id="tag-filter" hidden aria-label="Filter by tag"></div>
       <ul class="list" id="task-list" aria-live="polite"></ul>
       <p class="hint" id="list-hint"></p>
       <details class="paste" id="paste" hidden>
@@ -274,7 +282,9 @@
   let me = null;          // {id, email}
   let isAdmin = false;
   let curPerson = null;   // email whose list is shown
-  let tagFilter = null;   // show only tasks with this tag
+  // Which tag's tasks are shown: null for all, NO_TAG for tasks without tags, otherwise a tag name.
+  const NO_TAG = "\u0000untagged";
+  let tagFilter = null;
   let sb = null;
 
   // crypto.randomUUID only exists on https and localhost; this covers plain http on a local network.
@@ -480,7 +490,7 @@
     b.textContent = "#" + tag;
     if (extra) b.append(Object.assign(document.createElement("span"), { className: "n", textContent: extra }));
     b.setAttribute("aria-pressed", String(tag === tagFilter));
-    b.onclick = () => { tagFilter = tag === tagFilter ? null : tag; renderList(); };
+    b.onclick = () => { tagFilter = tag === tagFilter ? null : tag; lsSet("team.tag", tagFilter); renderList(); };
     return b;
   }
 
@@ -509,6 +519,8 @@
       curPerson = me.email;
     }
     renderList();
+    // A member with no tasks yet has nothing to list on the left.
+    $("side").hidden = $("people-group").hidden && $("tags-group").hidden;
   }
 
   function renderSide(list) {
@@ -529,7 +541,7 @@
       b.querySelector(".name").textContent = label;
       b.querySelector(".email").textContent = label === email ? "" : email;
       b.querySelector(".n").textContent = `${done}/${mine.length}`;
-      b.onclick = () => { curPerson = email; tagFilter = null; lsSet("team.person", email); render(); };
+      b.onclick = () => { curPerson = email; tagFilter = null; lsSet("team.person", email); lsSet("team.tag", null); render(); };
       box.append(b);
     });
     if (!list.length) box.append(Object.assign(document.createElement("p"), { className: "hint", textContent: "No one yet. Publish from ProTracker's People tab." }));
@@ -568,29 +580,45 @@
     return li;
   }
 
-  function renderList() {
-    const mine = curPerson ? rows.filter(r => r.assignee_email === curPerson).sort(bySort) : [];
-    // Tag filter: one chip per tag on this person's tasks, with how many tasks carry it.
+  // The shown person's tags down the left: All, each tag (busiest first), then Untagged.
+  function renderTags(mine) {
     const counts = new Map();
     mine.forEach(t => tagsOf(t).forEach(tag => counts.set(tag, (counts.get(tag) || 0) + 1)));
-    if (tagFilter && !counts.has(tagFilter)) tagFilter = null;
-    const fbox = $("tag-filter");
-    fbox.replaceChildren();
-    fbox.hidden = counts.size === 0;
-    if (counts.size) {
-      fbox.append(Object.assign(document.createElement("span"), { className: "label", textContent: "Tags" }));
-      [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).forEach(([tag, n]) => {
-        const c = chip(tag, String(n));
-        c.setAttribute("aria-label", `Show only #${tag} tasks (${n})`);
-        fbox.append(c);
-      });
-    }
-    const shown = tagFilter ? mine.filter(t => tagsOf(t).includes(tagFilter)) : mine;
+    const untagged = mine.filter(t => !tagsOf(t).length).length;
+    if (tagFilter === NO_TAG ? !untagged : tagFilter && !counts.has(tagFilter)) tagFilter = null;
+    const box = $("tag-items");
+    box.replaceChildren();
+    $("tags-group").hidden = !mine.length;
+    const item = (key, label, n, color) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "person-item tag-item";
+      b.style.setProperty("--c", color);
+      b.setAttribute("aria-current", String(key === tagFilter));
+      b.setAttribute("aria-label", `${label}, ${n} ${n === 1 ? "task" : "tasks"}`);
+      b.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="names"><span class="name"></span></span><span class="n"></span>';
+      b.querySelector(".name").textContent = label;
+      b.querySelector(".n").textContent = n;
+      b.onclick = () => { tagFilter = key; lsSet("team.tag", key); renderList(); };
+      box.append(b);
+    };
+    item(null, "All tasks", mine.length, "var(--accent)");
+    [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .forEach(([tag, n]) => item(tag, "#" + tag, n, tagColor(tag)));
+    if (untagged && counts.size) item(NO_TAG, "Untagged", untagged, "var(--muted)");
+  }
+
+  function renderList() {
+    const mine = curPerson ? rows.filter(r => r.assignee_email === curPerson).sort(bySort) : [];
+    renderTags(mine);
+    const shown = tagFilter === NO_TAG ? mine.filter(t => !tagsOf(t).length)
+      : tagFilter ? mine.filter(t => tagsOf(t).includes(tagFilter)) : mine;
     const open = shown.filter(r => !r.done), done = shown.filter(r => r.done);
-    $("list-title").textContent = isAdmin ? (curPerson ? labelFor(curPerson) : "People") : "My tasks";
-    $("list-sub").textContent = mine.length ? `${done.length} of ${mine.length} done` : "";
-    const pct = mine.length ? Math.round(done.length / mine.length * 100) : 0;
-    $("progress").hidden = !mine.length;
+    const what = tagFilter === NO_TAG ? "Untagged" : tagFilter ? "#" + tagFilter : isAdmin ? "All tasks" : "My tasks";
+    $("list-title").textContent = isAdmin && curPerson ? `${labelFor(curPerson)} · ${what}` : isAdmin ? "People" : what;
+    $("list-sub").textContent = shown.length ? `${done.length} of ${shown.length} done` : "";
+    const pct = shown.length ? Math.round(done.length / shown.length * 100) : 0;
+    $("progress").hidden = !shown.length;
     $("progress-fill").style.width = pct + "%";
     $("progress").setAttribute("aria-valuenow", String(pct));
     $("list-hint").textContent = isAdmin
@@ -668,10 +696,10 @@
     const { data, error } = await sb.rpc("is_admin");
     isAdmin = !error && data === true;
     curPerson = isAdmin ? lsGet("team.person", null) : me.email;
-    $("side").hidden = !isAdmin;
+    $("people-group").hidden = !isAdmin;
     $("paste").hidden = !isAdmin;
-    $("app").classList.toggle("solo", !isAdmin);
-    $("wrap").classList.toggle("narrow", !isAdmin);
+    tagFilter = lsGet("team.tag", null);
+    $("wrap").classList.remove("narrow");
     $("app").hidden = false;
     setStatus("Loading your tasks…");
     await loadRows();
