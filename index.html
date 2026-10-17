@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ProTracker Team</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+  /* Layout: sign-in card, then a list of the tasks pushed to you. The owner gets a list of people on the left. */
+  :root {
+    --paper: #f3f5f8;
+    --sheet: #ffffff;
+    --ink: #1b2330;
+    --muted: #677285;
+    --line: #dde2ea;
+    --accent: #2f5bd3;
+    --accent-soft: #e5ecfc;
+    --done: #2f8f5b;
+    --danger: #c23a3a;
+    --tag-0: #2f5bd3; --tag-1: #b4531c; --tag-2: #2f8466; --tag-3: #8a3fb8; --tag-4: #b8326a; --tag-5: #6b6a1e;
+    --font-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+    --font-body: "Atkinson Hyperlegible", -apple-system, system-ui, sans-serif;
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --paper: #12161d;
+      --sheet: #1b212b;
+      --ink: #e8ecf2;
+      --muted: #96a0b2;
+      --line: #2c3442;
+      --accent: #7f9ff5;
+      --accent-soft: #232f4d;
+      --done: #5cc58a;
+      --danger: #f07a7a;
+      --tag-0: #8aa6f7; --tag-1: #f0a06a; --tag-2: #6fd1a8; --tag-3: #c99af0; --tag-4: #f08fb6; --tag-5: #d4d27a;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #12161d;
+    --sheet: #1b212b;
+    --ink: #e8ecf2;
+    --muted: #96a0b2;
+    --line: #2c3442;
+    --accent: #7f9ff5;
+    --accent-soft: #232f4d;
+    --done: #5cc58a;
+    --danger: #f07a7a;
+    --tag-0: #8aa6f7; --tag-1: #f0a06a; --tag-2: #6fd1a8; --tag-3: #c99af0; --tag-4: #f08fb6; --tag-5: #d4d27a;
+  }
+
+  [hidden] { display: none !important; }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { min-height: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 17px;
+    line-height: 1.45;
+    padding-inline: 16px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; padding-block: max(20px, env(safe-area-inset-top)) 64px; display: grid; gap: 20px; }
+  .wrap.narrow { max-width: 720px; }
+
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; }
+  h1 { font-family: var(--font-display); font-weight: 800; font-size: 1.35rem; letter-spacing: -0.02em; margin: 0; line-height: 1; }
+  .who-am-i { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 0.9rem; min-width: 0; }
+  .who-am-i span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .btn {
+    font: inherit; font-weight: 700; border: 0; border-radius: 10px; cursor: pointer;
+    min-height: 48px; padding: 0 20px;
+  }
+  .btn-primary { background: var(--accent); color: var(--sheet); }
+  .btn-primary:disabled { opacity: 0.45; cursor: default; }
+  .btn:focus-visible, .check:focus-visible, .act:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .act {
+    font: inherit; font-size: 0.85rem; font-weight: 700; color: var(--accent); background: var(--accent-soft);
+    border: 0; border-radius: 999px; min-height: 36px; padding: 0 12px; cursor: pointer; white-space: nowrap;
+  }
+  .act.quiet { color: var(--muted); background: var(--sheet); border: 1px solid var(--line); font-weight: 400; }
+  .hint { color: var(--muted); font-size: 0.85rem; margin: 0; }
+  .error { color: var(--danger); font-size: 0.9rem; margin: 0; }
+  .status { color: var(--muted); font-size: 0.9rem; text-align: center; margin: 0; }
+  .status.err { color: var(--danger); }
+  .status.ok { color: var(--done); font-weight: 700; }
+  .card { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); padding: 20px; display: grid; gap: 14px; }
+  .card h2 { font-family: var(--font-display); font-weight: 600; font-size: 1.2rem; margin: 0; }
+  .field { display: grid; gap: 6px; }
+  .field label { font-size: 0.9rem; font-weight: 700; }
+  .field input, .paste-box input {
+    font: inherit; color: var(--ink); background: var(--paper); border: 1px solid var(--line);
+    border-radius: 10px; padding: 12px; min-width: 0; width: 100%;
+  }
+  .field input:focus, .paste-box input:focus { outline: none; border-color: var(--accent); }
+  #code { font-size: 1.4rem; letter-spacing: 0.3em; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .linkish { font: inherit; background: none; border: 0; color: var(--accent); cursor: pointer; padding: 4px 0; text-decoration: underline; }
+  .paste-box { display: flex; gap: 8px; }
+  details.paste summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
+  details.paste[open] summary { margin-bottom: 8px; }
+
+  /* People down the left (owner only), the chosen person's list on the right */
+  .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 20px; align-items: start; }
+  .layout.solo { grid-template-columns: minmax(0, 1fr); }
+  .side {
+    position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); max-height: calc(100vh - 24px); overflow-y: auto;
+    background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); padding: 8px; display: grid; gap: 2px;
+  }
+  .side h2 { margin: 6px 10px 4px; color: var(--muted); font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+  .side .hint { padding: 4px 10px 8px; }
+  #people-items { display: contents; }
+  .person-item {
+    --c: var(--muted);
+    font: inherit; display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; cursor: pointer;
+    background: none; border: 0; color: var(--ink); min-height: 48px; padding: 4px 10px; border-radius: 10px;
+  }
+  .person-item .names { flex: 1; min-width: 0; display: grid; line-height: 1.2; }
+  .person-item .names span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .person-item .email { color: var(--muted); font-size: 0.75rem; }
+  .person-item .n { color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+  .person-item:hover { background: var(--paper); }
+  .person-item[aria-current="true"] { background: color-mix(in srgb, var(--c) 14%, var(--sheet)); color: var(--c); font-weight: 700; }
+  .person-item:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .av {
+    flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--c); color: var(--sheet);
+    display: grid; place-items: center; font-size: 0.8rem; font-weight: 700; line-height: 1;
+  }
+
+  .main { display: grid; gap: 12px; min-width: 0; }
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  .section-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 1.15rem; margin: 0; overflow-wrap: anywhere; }
+  .section-head .sub { color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  .progress { height: 8px; border-radius: 999px; background: var(--sheet); border: 1px solid var(--line); overflow: hidden; }
+  .progress-fill { height: 100%; width: 0; background: var(--done); border-radius: 999px; }
+
+  ul.list { list-style: none; margin: 0; padding: 0; background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  li.task { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-top: 1px solid var(--line); min-height: 56px; }
+  li.task:first-child { border-top: 0; }
+  .check {
+    flex: none; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--muted);
+    background: transparent; cursor: pointer; display: grid; place-items: center; padding: 0;
+  }
+  .check svg { width: 16px; height: 16px; opacity: 0; }
+  .task.done .check { background: var(--done); border-color: var(--done); }
+  .task.done .check svg { opacity: 1; }
+  .task-body { flex: 1; min-width: 0; display: grid; gap: 2px; }
+  .title { overflow-wrap: anywhere; }
+  .task.done .title { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 2px; }
+  .meta { color: var(--muted); font-size: 0.8rem; }
+  li.group-head {
+    padding: 10px 14px; border-top: 1px solid var(--line); background: var(--paper); color: var(--muted);
+    font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
+  }
+  .empty { text-align: center; color: var(--muted); padding: 28px 20px; display: grid; gap: 4px; }
+  .empty strong { color: var(--ink); font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; }
+  @media (max-width: 720px) {
+    .layout { grid-template-columns: 1fr; }
+    .side { position: static; display: flex; gap: 6px; overflow-x: auto; max-height: none; }
+    .side h2, .side .hint { display: none; }
+    .person-item { width: auto; flex: none; white-space: nowrap; }
+    .person-item .email { display: none; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .check { transition: background-color 0.15s, border-color 0.15s; }
+    .progress-fill { transition: width 0.3s ease; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap narrow" id="wrap">
+  <header>
+    <h1>ProTracker Team</h1>
+    <div class="who-am-i" id="who" hidden>
+      <span id="who-email"></span>
+      <button class="act quiet" id="sign-out" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <p class="status" id="status" role="status">Loading…</p>
+
+  <!-- A publish link opened while someone other than the owner is signed in on this browser -->
+  <section class="card" id="blocked" hidden aria-labelledby="blocked-title">
+    <h2 id="blocked-title">Sign in as the owner to publish</h2>
+    <p class="hint" id="blocked-text" style="font-size:0.95rem"></p>
+    <div class="row">
+      <button class="btn btn-primary" id="blocked-switch" type="button">Sign out and sign in as owner</button>
+      <button class="linkish" id="blocked-dismiss" type="button">Not now</button>
+    </div>
+  </section>
+
+  <!-- Sign in: email, then the code from the email (or tap the link in it) -->
+  <section class="card" id="signin" hidden aria-labelledby="signin-title">
+    <h2 id="signin-title">Sign in</h2>
+    <form id="email-form" class="field" autocomplete="on">
+      <label for="email">Your email</label>
+      <input id="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" required placeholder="you@example.com">
+      <div class="row"><button class="btn btn-primary" id="send-code" type="submit">Email me a sign-in code</button></div>
+    </form>
+    <form id="code-form" class="field" hidden autocomplete="off">
+      <label for="code">Code from the email</label>
+      <input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="10" required placeholder="123456">
+      <div class="row">
+        <button class="btn btn-primary" id="verify" type="submit">Sign in</button>
+        <button class="linkish" id="change-email" type="button">Use a different email</button>
+      </div>
+      <p class="hint" id="code-hint"></p>
+    </form>
+    <p class="error" id="signin-error" hidden></p>
+    <p class="hint" id="demo-hint" hidden></p>
+    <p class="hint">No password needed. You'll only see the tasks shared with your email.</p>
+  </section>
+
+  <section class="layout" id="app" hidden>
+    <nav class="side" id="side" aria-label="People" hidden>
+      <h2>People</h2>
+      <div id="people-items"></div>
+    </nav>
+    <section class="main" aria-labelledby="list-title">
+      <div class="section-head">
+        <h2 id="list-title">My tasks</h2>
+        <span class="sub" id="list-sub"></span>
+      </div>
+      <div class="progress" id="progress" role="progressbar" aria-label="Tasks done" aria-valuemin="0" aria-valuemax="100" hidden><div class="progress-fill" id="progress-fill"></div></div>
+      <ul class="list" id="task-list" aria-live="polite"></ul>
+      <p class="hint" id="list-hint"></p>
+      <details class="paste" id="paste" hidden>
+        <summary>Paste a publish link from ProTracker</summary>
+        <form class="paste-box" id="paste-form" autocomplete="off">
+          <input id="paste-input" type="text" placeholder="Paste the link here" aria-label="Publish link from ProTracker">
+          <button class="btn btn-primary" type="submit">Publish</button>
+        </form>
+      </details>
+    </section>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+(() => {
+  // ---- Setup: your Supabase project's URL and anon (public) key ----
+  const SUPABASE_URL = "https://nygmsdgdccqeankpajnh.supabase.co";
+  const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im55Z21zZGdkY2NxZWFua3Bham5oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIyNDc1NDYsImV4cCI6MjEwNzgyMzU0Nn0.2vVnyfzrIiK8HyaQkkizqJfA40B-Lhmn2rtPtl05bWM";
+
+  const $ = (id) => document.getElementById(id);
+  const CHECK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="color:var(--sheet)"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
+
+  // Row: {id, assignee_email, source_id, title, done, completed_at, sort, ...}
+  // Every task comes from a ProTracker push; people only tick them off. sort follows ProTracker's order.
+  let rows = [];
+  let me = null;          // {id, email}
+  let isAdmin = false;
+  let curPerson = null;   // email whose list is shown
+  let sb = null;
+
+  // crypto.randomUUID only exists on https and localhost; this covers plain http on a local network.
+  const uuid = () => (crypto.randomUUID ? crypto.randomUUID()
+    : "10000000-1000-4000-8000-100000000000".replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
+  const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } };
+  const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+  const ssGet = (k) => { try { return sessionStorage.getItem(k); } catch { return null; } };
+  const ssSet = (k, v) => { try { if (v === null) sessionStorage.removeItem(k); else sessionStorage.setItem(k, v); } catch {} };
+  const normEmail = (s) => String(s || "").trim().toLowerCase();
+  const validEmail = (s) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+
+  function setStatus(text, kind) {
+    const el = $("status");
+    el.textContent = text || "";
+    el.className = "status" + (kind ? " " + kind : "");
+    el.hidden = !text;
+  }
+  function showError(id, text) {
+    const el = $(id);
+    el.textContent = text || "";
+    el.hidden = !text;
+  }
+
+  // ---- Publish links: ProTracker packs a person's tasks into the link's #publish= part ----
+  // "z." + base64url(deflate-raw(JSON)), or "j." + base64url(JSON) where compression isn't available.
+  // JSON: {v: 1, email, name, tasks: [{sid, title, done, parent (sid|null), order}]}
+  const fromB64url = (s) => {
+    const b = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
+    return Uint8Array.from(b, c => c.charCodeAt(0));
+  };
+  async function decodePublish(code) {
+    const [kind, body] = [code.slice(0, 2), code.slice(2)];
+    let bytes = fromB64url(body);
+    if (kind === "z.") {
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+      bytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    } else if (kind !== "j.") throw new Error("unknown format");
+    const p = JSON.parse(new TextDecoder().decode(bytes));
+    if (!p || p.v !== 1 || !validEmail(normEmail(p.email)) || !Array.isArray(p.tasks)) throw new Error("bad payload");
+    return p;
+  }
+  // The link may arrive before sign-in, so it waits in sessionStorage until the owner is signed in.
+  function takePublishFromUrl() {
+    const m = location.hash.match(/[#&]publish=([^&]+)/);
+    if (!m) return;
+    ssSet("team.publish", decodeURIComponent(m[1]));
+    history.replaceState(null, "", location.pathname + location.search);
+  }
+
+  // ProTracker's order, flattened: each subtask right after its parent, siblings by their ProTracker order.
+  function flatOrder(tasks) {
+    const sids = new Set(tasks.map(t => t.sid));
+    const kids = new Map();
+    tasks.forEach(t => {
+      const p = t.parent && sids.has(t.parent) && t.parent !== t.sid ? t.parent : null;
+      if (!kids.has(p)) kids.set(p, []);
+      kids.get(p).push(t);
+    });
+    kids.forEach(list => list.sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0)));
+    const out = [], seen = new Set();
+    const walk = (p) => (kids.get(p) || []).forEach(t => { if (seen.has(t.sid)) return; seen.add(t.sid); out.push(t); walk(t.sid); });
+    walk(null);
+    tasks.forEach(t => { if (!seen.has(t.sid)) out.push(t); });   // anything caught in a parent loop
+    return out;
+  }
+
+  // Applies a push right away: new tasks are added, existing ones take the new name and order
+  // (their ticks stay), and tasks no longer assigned are removed.
+  let publishing = false;
+  async function runPendingPublish() {
+    const code = ssGet("team.publish");
+    if (!code || publishing) return;
+    // Someone else is signed in on this browser: keep the link, and offer to switch to the owner.
+    if (!isAdmin) {
+      $("blocked-text").textContent = `This browser is signed in as ${me.email}. Only the team's owner can publish tasks. `
+        + "Sign out, sign in with the owner's email, and the push is applied straight away. "
+        + `To check what ${me.email} sees afterwards, sign in as them in a private window or on their own device.`;
+      $("blocked").hidden = false;
+      return;
+    }
+    $("blocked").hidden = true;
+    let p;
+    try { p = await decodePublish(code); }
+    catch { ssSet("team.publish", null); setStatus("That publish link looks damaged. Publish again from ProTracker.", "err"); return; }
+    publishing = true;
+    const email = normEmail(p.email);
+    const name = String(p.name || "").slice(0, 60);
+    setStatus(`Publishing to ${name || email}…`);
+    try {
+      const { data: current, error: readErr } = await sb.from("team_tasks").select("*").eq("assignee_email", email);
+      if (readErr) throw readErr;
+      const bySid = new Map((current || []).filter(r => r.source_id).map(r => [r.source_id, r]));
+      const incoming = flatOrder(p.tasks.filter(t => t && typeof t.sid === "string" && typeof t.title === "string" && t.title.trim()));
+      const now = new Date().toISOString();
+      const add = [], update = [];
+      let renamed = 0;
+      incoming.forEach((t, k) => {
+        const title = t.title.replace(/\s+/g, " ").trim().slice(0, 300);
+        const old = bySid.get(t.sid);
+        if (!old) {
+          add.push({ id: uuid(), assignee_email: email, source_id: t.sid, title, done: !!t.done, completed_at: t.done ? now : null, parent_id: null, sort: k, created_by: me.id });
+        } else if (old.title !== title || old.sort !== k || old.parent_id) {
+          if (old.title !== title) renamed++;
+          update.push([old.id, { title, sort: k, parent_id: null }]);
+        }
+      });
+      const keep = new Set(incoming.map(t => t.sid));
+      const remove = (current || []).filter(r => !r.source_id || !keep.has(r.source_id)).map(r => r.id);
+      if (add.length) {
+        const { error } = await sb.from("team_tasks").insert(add);
+        if (error) throw error;
+      }
+      for (const [id, patch] of update) {
+        const { error } = await sb.from("team_tasks").update(patch).eq("id", id);
+        if (error) throw error;
+      }
+      if (remove.length) {
+        const { error } = await sb.from("team_tasks").delete().in("id", remove);
+        if (error) throw error;
+      }
+      ssSet("team.publish", null);
+      if (name) lsSet("team.names", { ...names(), [email]: name });
+      curPerson = email;
+      lsSet("team.person", email);
+      await loadRows();
+      const parts = [`${incoming.length} ${incoming.length === 1 ? "task" : "tasks"}`];
+      if (add.length) parts.push(`${add.length} new`);
+      if (renamed) parts.push(`${renamed} renamed`);
+      if (remove.length) parts.push(`${remove.length} removed`);
+      setStatus(`Published to ${name || email}: ${parts.join(", ")}.`, "ok");
+    } catch (e) {
+      // The link stays saved, so reloading tries again; tasks already sent aren't duplicated.
+      setStatus("Publishing didn't finish: " + (e.message || "unknown error") + ". Reload to try again.", "err");
+      await loadRows();
+    } finally {
+      publishing = false;
+    }
+  }
+  $("blocked-switch").addEventListener("click", async () => { $("blocked").hidden = true; await sb.auth.signOut(); });
+  $("blocked-dismiss").addEventListener("click", () => { ssSet("team.publish", null); $("blocked").hidden = true; });
+  $("paste-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const v = $("paste-input").value.trim();
+    const m = v.match(/publish=([^&\s]+)/) || v.match(/^([zj]\.[A-Za-z0-9_-]+)$/);
+    if (!m) { setStatus("That doesn't look like a publish link from ProTracker.", "err"); return; }
+    ssSet("team.publish", decodeURIComponent(m[1]));
+    $("paste-input").value = "";
+    $("paste").open = false;
+    runPendingPublish();
+  });
+
+  // ---- Data ----
+  async function loadRows() {
+    const { data, error } = await sb.from("team_tasks").select("*");
+    if (error) {
+      // PGRST205: the table doesn't exist, so schema.sql hasn't been run in this Supabase project.
+      setStatus(error.code === "PGRST205"
+        ? "The team database isn't set up yet. Run team/schema.sql in the Supabase SQL Editor, then reload."
+        : "Couldn't load tasks. Check your connection and reload.", "err");
+      return;
+    }
+    rows = data || [];
+    if ($("status").textContent === "Loading your tasks…") setStatus("");
+    render();
+  }
+  let reloadTimer = 0;
+  const reloadSoon = () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(loadRows, 300); };
+
+  // A tick shows at once, then goes to the server; a refusal reloads the real state.
+  function toggleDone(t) {
+    const patch = { done: !t.done, completed_at: t.done ? null : new Date().toISOString() };
+    rows = rows.map(r => r.id === t.id ? { ...r, ...patch } : r);
+    render();
+    sb.from("team_tasks").update(patch).eq("id", t.id).then(({ error }) => {
+      if (!error) return;
+      setStatus("Couldn't save that tick. It's been undone. " + (error.message || ""), "err");
+      reloadSoon();
+    });
+  }
+
+  // ---- Rendering ----
+  const names = () => lsGet("team.names", {});
+  const labelFor = (email) => names()[email] || email;
+  function personColor(email) {
+    let h = 0;
+    for (const ch of email) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    return `var(--tag-${h % 6})`;
+  }
+  function peopleList() {
+    const n = names();
+    return [...new Set(rows.map(r => r.assignee_email))]
+      .sort((a, b) => (n[a] || a).localeCompare(n[b] || b, undefined, { sensitivity: "base" }));
+  }
+  const bySort = (a, b) => (a.sort || 0) - (b.sort || 0) || String(a.created_at || "").localeCompare(String(b.created_at || ""));
+
+  function render() {
+    if (!me) return;
+    if (isAdmin) {
+      const list = peopleList();
+      if (!curPerson || !list.includes(curPerson)) curPerson = list[0] || null;
+      renderSide(list);
+    } else {
+      curPerson = me.email;
+    }
+    renderList();
+  }
+
+  function renderSide(list) {
+    const box = $("people-items");
+    box.replaceChildren();
+    list.forEach(email => {
+      const mine = rows.filter(r => r.assignee_email === email);
+      const done = mine.filter(r => r.done).length;
+      const label = labelFor(email);
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "person-item";
+      b.style.setProperty("--c", personColor(email));
+      b.setAttribute("aria-current", String(email === curPerson));
+      b.setAttribute("aria-label", `${label}, ${done} of ${mine.length} done`);
+      b.innerHTML = '<span class="av" aria-hidden="true"></span><span class="names"><span class="name"></span><span class="email"></span></span><span class="n"></span>';
+      b.querySelector(".av").textContent = (label.match(/[\p{L}\p{N}]/u) || ["?"])[0].toUpperCase();
+      b.querySelector(".name").textContent = label;
+      b.querySelector(".email").textContent = label === email ? "" : email;
+      b.querySelector(".n").textContent = `${done}/${mine.length}`;
+      b.onclick = () => { curPerson = email; lsSet("team.person", email); render(); };
+      box.append(b);
+    });
+    if (!list.length) box.append(Object.assign(document.createElement("p"), { className: "hint", textContent: "No one yet. Publish from ProTracker's People tab." }));
+  }
+
+  function emptyRow(head, body) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.innerHTML = "<strong></strong><span></span>";
+    li.querySelector("strong").textContent = head;
+    li.querySelector("span").textContent = body;
+    return li;
+  }
+  function taskRow(t) {
+    const li = document.createElement("li");
+    li.className = "task" + (t.done ? " done" : "");
+    li.innerHTML = `<button class="check" type="button" aria-label="${t.done ? "Mark as not done" : "Mark as done"}">${CHECK}</button><div class="task-body"><div class="title"></div></div>`;
+    li.querySelector(".title").textContent = t.title;
+    if (t.done && t.completed_at) {
+      const m = document.createElement("div");
+      m.className = "meta";
+      m.textContent = "Done " + new Date(t.completed_at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      li.querySelector(".task-body").append(m);
+    }
+    li.querySelector(".check").onclick = () => toggleDone(t);
+    return li;
+  }
+
+  function renderList() {
+    const mine = curPerson ? rows.filter(r => r.assignee_email === curPerson).sort(bySort) : [];
+    const open = mine.filter(r => !r.done), done = mine.filter(r => r.done);
+    $("list-title").textContent = isAdmin ? (curPerson ? labelFor(curPerson) : "People") : "My tasks";
+    $("list-sub").textContent = mine.length ? `${done.length} of ${mine.length} done` : "";
+    const pct = mine.length ? Math.round(done.length / mine.length * 100) : 0;
+    $("progress").hidden = !mine.length;
+    $("progress-fill").style.width = pct + "%";
+    $("progress").setAttribute("aria-valuenow", String(pct));
+    $("list-hint").textContent = isAdmin
+      ? "To change this list, edit the tasks in ProTracker and publish again. Ticks made here are kept."
+      : "Tick a task when it's done. New tasks appear here when they're shared with you.";
+    const ul = $("task-list");
+    ul.replaceChildren();
+    if (!curPerson) { ul.append(emptyRow("No people yet", "In ProTracker, open People, pick someone, add their email and tap Publish to team.")); return; }
+    if (!mine.length) { ul.append(emptyRow("No tasks yet", isAdmin ? "Publish from ProTracker to add tasks here." : "Tasks shared with you will show up here.")); return; }
+    open.forEach(t => ul.append(taskRow(t)));
+    if (done.length) {
+      const h = document.createElement("li");
+      h.className = "group-head";
+      h.textContent = `Done (${done.length})`;
+      ul.append(h);
+      done.forEach(t => ul.append(taskRow(t)));
+    }
+  }
+
+  // ---- Sign in: a one-time code by email (the link in the same email works too) ----
+  let codeEmail = "";
+  $("email-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const email = normEmail($("email").value);
+    if (!validEmail(email)) { showError("signin-error", "Enter a valid email address."); return; }
+    $("send-code").disabled = true;
+    showError("signin-error", "");
+    const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } });
+    $("send-code").disabled = false;
+    if (error) { showError("signin-error", "Couldn't send the email: " + error.message); return; }
+    codeEmail = email;
+    $("email-form").hidden = true;
+    $("code-form").hidden = false;
+    $("code-hint").textContent = `We sent a code to ${email}. It can take a minute; check spam too. You can also just tap the link in that email.`;
+    $("code").focus();
+  });
+  $("code-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const token = $("code").value.replace(/\s+/g, "");
+    if (!token) return;
+    $("verify").disabled = true;
+    showError("signin-error", "");
+    const { error } = await sb.auth.verifyOtp({ email: codeEmail, token, type: "email" });
+    $("verify").disabled = false;
+    if (error) showError("signin-error", "That code didn't work: " + error.message);
+  });
+  $("change-email").addEventListener("click", () => {
+    $("code-form").hidden = true;
+    $("email-form").hidden = false;
+    $("code").value = "";
+    showError("signin-error", "");
+  });
+  $("sign-out").addEventListener("click", async () => { await sb.auth.signOut(); });
+
+  let channel = null;
+  async function onSession(session) {
+    if (!session) {
+      me = null; isAdmin = false; rows = [];
+      if (channel) { sb.removeChannel(channel); channel = null; }
+      $("who").hidden = true;
+      $("app").hidden = true;
+      $("blocked").hidden = true;
+      $("signin").hidden = false;
+      $("wrap").classList.add("narrow");
+      setStatus(ssGet("team.publish") ? "Sign in with the owner's email to publish." : "");
+      return;
+    }
+    if (me && me.id === session.user.id) return;
+    me = { id: session.user.id, email: normEmail(session.user.email) };
+    $("who-email").textContent = me.email;
+    $("who").hidden = false;
+    $("signin").hidden = true;
+    $("code-form").hidden = true;
+    $("email-form").hidden = false;
+    const { data, error } = await sb.rpc("is_admin");
+    isAdmin = !error && data === true;
+    curPerson = isAdmin ? lsGet("team.person", null) : me.email;
+    $("side").hidden = !isAdmin;
+    $("paste").hidden = !isAdmin;
+    $("app").classList.toggle("solo", !isAdmin);
+    $("wrap").classList.toggle("narrow", !isAdmin);
+    $("app").hidden = false;
+    setStatus("Loading your tasks…");
+    await loadRows();
+    // Live: changes to tasks you can see show up here (the database filters what you receive).
+    channel = sb.channel("team_tasks")
+      .on("postgres_changes", { event: "*", schema: "public", table: "team_tasks" }, reloadSoon)
+      .subscribe();
+    runPendingPublish();
+  }
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && me) reloadSoon(); });
+  // A publish link opened while the app is already open in this tab only changes the #part.
+  window.addEventListener("hashchange", () => {
+    if (!/[#&]publish=/.test(location.hash)) return;
+    takePublishFromUrl();
+    if (me) runPendingPublish();
+  });
+
+  // Demo mode (?demo): load the in-browser stand-in for Supabase, then start.
+  function loadDemo() {
+    return new Promise((res) => {
+      const s = document.createElement("script");
+      s.src = "demo-client.js";
+      s.onload = res;
+      s.onerror = res;
+      document.head.append(s);
+    });
+  }
+  async function start() {
+    takePublishFromUrl();
+    if (/[?&]demo\b/.test(location.search) && !window.TEAM_CLIENT) await loadDemo();
+    if (window.TEAM_CLIENT && window.TEAM_CLIENT.demo) {
+      const d = window.TEAM_CLIENT.demo;
+      $("signin-title").textContent = "Sign in (demo mode)";
+      $("demo-hint").textContent = `Demo mode: everything stays in this browser. Use any email and the code ${d.code}. Sign in as ${d.owner} to be the owner. Each tab can be a different person.`;
+      $("demo-hint").hidden = false;
+    }
+    if (window.TEAM_CLIENT) sb = window.TEAM_CLIENT;   // demo mode and local tests
+    else if (SUPABASE_URL.startsWith("YOUR_") || !window.supabase) {
+      setStatus(window.supabase ? "This app isn't connected to its database yet. Add the Supabase URL and key at the top of the script." : "Couldn't load the sign-in library. Check your connection and reload.", "err");
+      return;
+    } else sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    sb.auth.onAuthStateChange((_event, session) => { setTimeout(() => onSession(session), 0); });
+    sb.auth.getSession().then(({ data }) => onSession(data.session));
+  }
+  start();
+})();
+</script>
+</body>
+</html>
