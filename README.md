@@ -5,6 +5,7 @@ A hosted companion to ProTracker. You push the tasks you assigned someone in Pro
 - `index.html`: the whole app, a static page that runs on any static host.
 - `schema.sql`: the database tables and privacy rules for Supabase.
 - `demo-client.js`: an in-browser stand-in for Supabase, used only by demo mode (`?demo`).
+- `deploy.sh`: publishes this folder to GitHub Pages (live at https://toomu.github.io/protracker-team/).
 
 ## Try it locally (demo mode)
 
