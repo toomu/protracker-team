@@ -27,6 +27,8 @@ create table if not exists public.team_tasks (
   updated_at timestamptz not null default now(),
   unique (assignee_email, source_id)
 );
+-- Tags from ProTracker (lowercase words, no #). Added after the first version, hence the separate statement.
+alter table public.team_tasks add column if not exists tags text[] not null default '{}';
 create index if not exists team_tasks_assignee on public.team_tasks (assignee_email);
 create index if not exists team_tasks_parent on public.team_tasks (parent_id);
 

@@ -155,6 +155,21 @@
   .title { overflow-wrap: anywhere; }
   .task.done .title { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 2px; }
   .meta { color: var(--muted); font-size: 0.8rem; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    --c: var(--tag-0);
+    font: inherit; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.01em;
+    color: var(--c); background: color-mix(in srgb, var(--c) 13%, var(--sheet));
+    border: 1px solid color-mix(in srgb, var(--c) 30%, var(--sheet));
+    border-radius: 999px; padding: 2px 10px; min-height: 28px; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 4px;
+  }
+  .chip[aria-pressed="true"] { background: var(--c); color: var(--sheet); border-color: var(--c); }
+  .chip .n { font-weight: 400; opacity: 0.75; font-variant-numeric: tabular-nums; }
+  .chip:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .task.done .chip { opacity: 0.6; }
+  .tag-filter { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .tag-filter .label { color: var(--muted); font-size: 0.85rem; margin-right: 2px; }
   li.group-head {
     padding: 10px 14px; border-top: 1px solid var(--line); background: var(--paper); color: var(--muted);
     font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
@@ -229,6 +244,7 @@
         <span class="sub" id="list-sub"></span>
       </div>
       <div class="progress" id="progress" role="progressbar" aria-label="Tasks done" aria-valuemin="0" aria-valuemax="100" hidden><div class="progress-fill" id="progress-fill"></div></div>
+      <div class="tag-filter" id="tag-filter" hidden aria-label="Filter by tag"></div>
       <ul class="list" id="task-list" aria-live="polite"></ul>
       <p class="hint" id="list-hint"></p>
       <details class="paste" id="paste" hidden>
@@ -252,12 +268,13 @@
   const $ = (id) => document.getElementById(id);
   const CHECK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="color:var(--sheet)"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
 
-  // Row: {id, assignee_email, source_id, title, done, completed_at, sort, ...}
+  // Row: {id, assignee_email, source_id, title, tags[], done, completed_at, sort, ...}
   // Every task comes from a ProTracker push; people only tick them off. sort follows ProTracker's order.
   let rows = [];
   let me = null;          // {id, email}
   let isAdmin = false;
   let curPerson = null;   // email whose list is shown
+  let tagFilter = null;   // show only tasks with this tag
   let sb = null;
 
   // crypto.randomUUID only exists on https and localhost; this covers plain http on a local network.
@@ -284,7 +301,7 @@
 
   // ---- Publish links: ProTracker packs a person's tasks into the link's #publish= part ----
   // "z." + base64url(deflate-raw(JSON)), or "j." + base64url(JSON) where compression isn't available.
-  // JSON: {v: 1, email, name, tasks: [{sid, title, done, parent (sid|null), order}]}
+  // JSON: {v: 1, email, name, tasks: [{sid, title, done, tags[], parent (sid|null), order}]}
   const fromB64url = (s) => {
     const b = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
     return Uint8Array.from(b, c => c.charCodeAt(0));
@@ -354,15 +371,17 @@
       const incoming = flatOrder(p.tasks.filter(t => t && typeof t.sid === "string" && typeof t.title === "string" && t.title.trim()));
       const now = new Date().toISOString();
       const add = [], update = [];
-      let renamed = 0;
+      let renamed = 0, retagged = 0;
       incoming.forEach((t, k) => {
         const title = t.title.replace(/\s+/g, " ").trim().slice(0, 300);
+        const tags = cleanTags(t.tags);
         const old = bySid.get(t.sid);
         if (!old) {
-          add.push({ id: uuid(), assignee_email: email, source_id: t.sid, title, done: !!t.done, completed_at: t.done ? now : null, parent_id: null, sort: k, created_by: me.id });
-        } else if (old.title !== title || old.sort !== k || old.parent_id) {
+          add.push({ id: uuid(), assignee_email: email, source_id: t.sid, title, tags, done: !!t.done, completed_at: t.done ? now : null, parent_id: null, sort: k, created_by: me.id });
+        } else if (old.title !== title || old.sort !== k || old.parent_id || tagsOf(old).join(" ") !== tags.join(" ")) {
           if (old.title !== title) renamed++;
-          update.push([old.id, { title, sort: k, parent_id: null }]);
+          if (tagsOf(old).join(" ") !== tags.join(" ")) retagged++;
+          update.push([old.id, { title, tags, sort: k, parent_id: null }]);
         }
       });
       const keep = new Set(incoming.map(t => t.sid));
@@ -387,11 +406,16 @@
       const parts = [`${incoming.length} ${incoming.length === 1 ? "task" : "tasks"}`];
       if (add.length) parts.push(`${add.length} new`);
       if (renamed) parts.push(`${renamed} renamed`);
+      if (retagged) parts.push(`${retagged} with new tags`);
       if (remove.length) parts.push(`${remove.length} removed`);
       setStatus(`Published to ${name || email}: ${parts.join(", ")}.`, "ok");
     } catch (e) {
       // The link stays saved, so reloading tries again; tasks already sent aren't duplicated.
-      setStatus("Publishing didn't finish: " + (e.message || "unknown error") + ". Reload to try again.", "err");
+      // PGRST204 naming "tags": the database predates tags; re-running schema.sql adds the column.
+      const hint = e && e.code === "PGRST204" && /tags/.test(e.message || "")
+        ? "The database needs the tags column: run team/schema.sql again in the Supabase SQL Editor, then reload."
+        : "Publishing didn't finish: " + (e.message || "unknown error") + ". Reload to try again.";
+      setStatus(hint, "err");
       await loadRows();
     } finally {
       publishing = false;
@@ -439,6 +463,27 @@
     });
   }
 
+  // ---- Tags (same look as ProTracker: lowercase words, a colour per tag) ----
+  const tagsOf = (t) => Array.isArray(t.tags) ? t.tags : [];
+  const cleanTags = (list) => [...new Set((Array.isArray(list) ? list : [])
+    .map(x => String(x).toLowerCase().replace(/[^\p{L}\p{N}_-]+/gu, "").slice(0, 24)).filter(Boolean))].slice(0, 8);
+  function tagColor(tag) {
+    let h = 0;
+    for (const ch of tag) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    return `var(--tag-${h % 6})`;
+  }
+  function chip(tag, extra) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip";
+    b.style.setProperty("--c", tagColor(tag));
+    b.textContent = "#" + tag;
+    if (extra) b.append(Object.assign(document.createElement("span"), { className: "n", textContent: extra }));
+    b.setAttribute("aria-pressed", String(tag === tagFilter));
+    b.onclick = () => { tagFilter = tag === tagFilter ? null : tag; renderList(); };
+    return b;
+  }
+
   // ---- Rendering ----
   const names = () => lsGet("team.names", {});
   const labelFor = (email) => names()[email] || email;
@@ -484,7 +529,7 @@
       b.querySelector(".name").textContent = label;
       b.querySelector(".email").textContent = label === email ? "" : email;
       b.querySelector(".n").textContent = `${done}/${mine.length}`;
-      b.onclick = () => { curPerson = email; lsSet("team.person", email); render(); };
+      b.onclick = () => { curPerson = email; tagFilter = null; lsSet("team.person", email); render(); };
       box.append(b);
     });
     if (!list.length) box.append(Object.assign(document.createElement("p"), { className: "hint", textContent: "No one yet. Publish from ProTracker's People tab." }));
@@ -503,6 +548,16 @@
     li.className = "task" + (t.done ? " done" : "");
     li.innerHTML = `<button class="check" type="button" aria-label="${t.done ? "Mark as not done" : "Mark as done"}">${CHECK}</button><div class="task-body"><div class="title"></div></div>`;
     li.querySelector(".title").textContent = t.title;
+    if (tagsOf(t).length) {
+      const box = document.createElement("div");
+      box.className = "tags";
+      tagsOf(t).forEach(tag => {
+        const c = chip(tag);
+        c.setAttribute("aria-label", `Show only #${tag} tasks`);
+        box.append(c);
+      });
+      li.querySelector(".task-body").append(box);
+    }
     if (t.done && t.completed_at) {
       const m = document.createElement("div");
       m.className = "meta";
@@ -515,7 +570,23 @@
 
   function renderList() {
     const mine = curPerson ? rows.filter(r => r.assignee_email === curPerson).sort(bySort) : [];
-    const open = mine.filter(r => !r.done), done = mine.filter(r => r.done);
+    // Tag filter: one chip per tag on this person's tasks, with how many tasks carry it.
+    const counts = new Map();
+    mine.forEach(t => tagsOf(t).forEach(tag => counts.set(tag, (counts.get(tag) || 0) + 1)));
+    if (tagFilter && !counts.has(tagFilter)) tagFilter = null;
+    const fbox = $("tag-filter");
+    fbox.replaceChildren();
+    fbox.hidden = counts.size === 0;
+    if (counts.size) {
+      fbox.append(Object.assign(document.createElement("span"), { className: "label", textContent: "Tags" }));
+      [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).forEach(([tag, n]) => {
+        const c = chip(tag, String(n));
+        c.setAttribute("aria-label", `Show only #${tag} tasks (${n})`);
+        fbox.append(c);
+      });
+    }
+    const shown = tagFilter ? mine.filter(t => tagsOf(t).includes(tagFilter)) : mine;
+    const open = shown.filter(r => !r.done), done = shown.filter(r => r.done);
     $("list-title").textContent = isAdmin ? (curPerson ? labelFor(curPerson) : "People") : "My tasks";
     $("list-sub").textContent = mine.length ? `${done.length} of ${mine.length} done` : "";
     const pct = mine.length ? Math.round(done.length / mine.length * 100) : 0;

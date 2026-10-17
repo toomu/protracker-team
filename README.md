@@ -5,7 +5,8 @@ A hosted companion to ProTracker. You push the tasks you assigned someone in Pro
 - `index.html`: the whole app, a static page that runs on any static host.
 - `schema.sql`: the database tables and privacy rules for Supabase.
 - `demo-client.js`: an in-browser stand-in for Supabase, used only by demo mode (`?demo`).
-- `deploy.sh`: publishes this folder to GitHub Pages (live at https://toomu.github.io/protracker-team/).
+- `deploy.sh`: publishes this folder to GitHub Pages (live at https://team.indexhomes.in/).
+- `CNAME`: the custom domain GitHub Pages serves the app on.
 
 ## Try it locally (demo mode)
 
@@ -40,7 +41,8 @@ Supabase's built-in email sender only sends a few emails per hour, which is fine
 
 What a push does, for that one person:
 - Their list becomes exactly the tasks assigned to them in ProTracker (Repo excluded), in ProTracker's order, with subtasks right after their parent.
-- New tasks are added; existing ones take any new name. Ticks they made are kept.
+- New tasks are added; existing ones take any new name and tags. Ticks they made are kept.
+- Tags show as coloured chips, with a tag filter above the list, just like in ProTracker.
 - Tasks no longer assigned to them are removed.
 
 ## Who can do what
