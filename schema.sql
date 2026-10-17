@@ -116,3 +116,45 @@ begin
     alter publication supabase_realtime add table public.team_tasks;
   end if;
 end $$;
+
+-- ---- Sync key: lets ProTracker read team members' ticks without signing in ----
+-- The owner creates a key in the team app (Connect ProTracker) and pastes it into ProTracker once.
+-- Only a hash of the key is stored. A new key replaces the old one.
+create table if not exists public.sync_keys (
+  key_hash text primary key,
+  owner_id uuid not null references auth.users (id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+alter table public.sync_keys enable row level security;
+-- No policies on purpose: only the functions below touch this table.
+
+create or replace function public.create_sync_key() returns text
+language plpgsql security definer set search_path = ''
+as $$
+declare k text;
+begin
+  if not public.is_admin() then
+    raise exception 'only the owner can create a sync key';
+  end if;
+  k := replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
+  delete from public.sync_keys where owner_id = auth.uid();
+  insert into public.sync_keys (key_hash, owner_id) values (encode(sha256(convert_to(k, 'UTF8')), 'hex'), auth.uid());
+  return k;
+end $$;
+revoke all on function public.create_sync_key() from public, anon;
+grant execute on function public.create_sync_key() to authenticated;
+
+-- With a valid key: which published tasks are ticked, and by whom. Nothing else.
+create or replace function public.team_progress(sync_key text)
+returns table (source_id text, assignee_email text, done boolean, completed_at timestamptz)
+language sql stable security definer set search_path = ''
+as $$
+  select t.source_id, t.assignee_email, t.done, t.completed_at
+  from public.team_tasks t
+  where t.source_id is not null
+    and exists (
+      select 1 from public.sync_keys k
+      where k.key_hash = encode(sha256(convert_to(coalesce(sync_key, ''), 'UTF8')), 'hex')
+    )
+$$;
+grant execute on function public.team_progress(text) to anon, authenticated;
