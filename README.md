@@ -50,11 +50,12 @@ What a push does, for that one person:
 
 When a team member ticks a task you pushed, ProTracker can show it as a green "✓ name" pill on that task, separate from your own tick.
 
-1. In the team app, signed in as the owner, open **Show team ticks in ProTracker** and tap **Create sync key**.
-2. In ProTracker, go to People → any person → **Team ticks**, paste the key, and Save.
-3. ProTracker checks for new ticks when you open it and every minute while it's open.
+claude.ai doesn't let ProTracker reach the database, so ticks travel by clipboard:
 
-If claude.ai doesn't let ProTracker reach the database, ProTracker says so. Then tap **Copy progress** in the team app and paste that code into the same box whenever you want to update. The key only lets ProTracker read which pushed tasks are ticked and by whom. Creating a new key disconnects the old one.
+1. In the team app, signed in as the owner, tap **Copy ticks for ProTracker** (top right of the list). It copies everyone's ticks at once.
+2. In ProTracker, go to People → any person → **Team ticks** and tap **Paste team ticks**. If the page may not read the clipboard, paste the code into the box and tap Save.
+
+Repeat whenever you want to update. Where ProTracker can reach the database (for example a copy opened outside claude.ai), a sync key does this by itself: open **Show team ticks in ProTracker**, tap **Create sync key**, and paste the key into the same box. ProTracker then checks when you open it and every minute while it's open. The key only lets ProTracker read which pushed tasks are ticked and by whom. Creating a new key disconnects the old one.
 
 ## Who can do what
 
