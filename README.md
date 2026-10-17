@@ -1,6 +1,6 @@
 # ProTracker Team
 
-A hosted companion to ProTracker. You push the tasks you assigned someone in ProTracker, and they sign in here with their email to see them as a simple list and tick them off. The list always comes from your pushes: people can't add, rename, rearrange or delete tasks here.
+A hosted companion to ProTracker. You push the tasks you assigned someone in ProTracker, and they sign in here with their email to see them as a simple list and tick them off. They can also add tasks of their own; those stay in the team app and never go back to ProTracker.
 
 - `index.html`: the whole app, a static page that runs on any static host.
 - `schema.sql`: the database tables and privacy rules for Supabase.
@@ -44,9 +44,10 @@ What a push does, for that one person:
 - New tasks are added; existing ones take any new name and tags. Ticks they made are kept.
 - Tags show as coloured chips on each task, and a Tags column on the left (like ProTracker's Tree view) shows one tag's tasks at a time.
 - Tasks no longer assigned to them are removed.
+- Tasks they added themselves are never changed or removed by a push.
 
 ## Who can do what
 
 The database enforces these rules, not the page:
-- **Each person** sees only tasks for their own email and ticks them off. They can't touch anyone else's tasks or move a task into someone else's list. (The database would also let them rename their own tasks or add tasks of their own, but the app doesn't offer that.)
+- **Each person** sees only tasks for their own email. They can tick tasks, add their own, and delete the ones they added (not the pushed ones). They can't touch anyone else's tasks or move a task into someone else's list. The owner can see the tasks they add.
 - **The owner** (anyone in `public.admins`) sees and changes everyone's tasks and publishes.

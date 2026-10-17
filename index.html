@@ -175,6 +175,17 @@
     padding: 10px 14px; border-top: 1px solid var(--line); background: var(--paper); color: var(--muted);
     font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em;
   }
+  .add-form { display: flex; gap: 8px; background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px; }
+  .add-form:focus-within { border-color: var(--accent); }
+  .add-form input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink); font: inherit; padding: 10px; outline: none; }
+  .add-form .btn { min-height: 44px; }
+  .del {
+    flex: none; width: 40px; height: 40px; border: 0; background: transparent; color: var(--muted);
+    border-radius: 10px; cursor: pointer; display: grid; place-items: center; padding: 0;
+  }
+  .del:hover { color: var(--danger); background: var(--paper); }
+  .del:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .del svg { width: 18px; height: 18px; }
   .empty { text-align: center; color: var(--muted); padding: 28px 20px; display: grid; gap: 4px; }
   .empty strong { color: var(--ink); font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; }
   @media (max-width: 720px) {
@@ -253,6 +264,10 @@
         <span class="sub" id="list-sub"></span>
       </div>
       <div class="progress" id="progress" role="progressbar" aria-label="Tasks done" aria-valuemin="0" aria-valuemax="100" hidden><div class="progress-fill" id="progress-fill"></div></div>
+      <form class="add-form" id="add-form" autocomplete="off" hidden>
+        <input id="add-input" type="text" maxlength="300" placeholder="Add a task of your own… #tag to tag it" aria-label="Add a task of your own" enterkeyhint="done">
+        <button class="btn btn-primary" id="add-btn" type="submit" disabled>Add</button>
+      </form>
       <ul class="list" id="task-list" aria-live="polite"></ul>
       <p class="hint" id="list-hint"></p>
       <details class="paste" id="paste" hidden>
@@ -277,7 +292,8 @@
   const CHECK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="color:var(--sheet)"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
 
   // Row: {id, assignee_email, source_id, title, tags[], done, completed_at, sort, ...}
-  // Every task comes from a ProTracker push; people only tick them off. sort follows ProTracker's order.
+  // Tasks pushed from ProTracker have a source_id; a push only ever changes those (sort = ProTracker's order).
+  // Tasks people add themselves have source_id null: they stay in the team app and pushes leave them alone.
   let rows = [];
   let me = null;          // {id, email}
   let isAdmin = false;
@@ -395,7 +411,7 @@
         }
       });
       const keep = new Set(incoming.map(t => t.sid));
-      const remove = (current || []).filter(r => !r.source_id || !keep.has(r.source_id)).map(r => r.id);
+      const remove = (current || []).filter(r => r.source_id && !keep.has(r.source_id)).map(r => r.id);
       if (add.length) {
         const { error } = await sb.from("team_tasks").insert(add);
         if (error) throw error;
@@ -472,6 +488,48 @@
       reloadSoon();
     });
   }
+
+  // People add their own tasks; they never go back to ProTracker. #words become tags,
+  // and the tag being viewed is added so the new task shows up where they are.
+  const TAG_RE = /(^|\s)#([\p{L}\p{N}_-]+)/gu;
+  function addOwnTask(text) {
+    const found = [];
+    let title = String(text).replace(TAG_RE, (m, sp, tag) => { found.push(tag); return sp; }).replace(/\s+/g, " ").trim();
+    if (!title) title = String(text).replace(/\s+/g, " ").trim();
+    if (!title || !me) return;
+    if (tagFilter && tagFilter !== NO_TAG) found.unshift(tagFilter);
+    const row = {
+      id: uuid(), assignee_email: me.email, source_id: null, title: title.slice(0, 300), tags: cleanTags(found),
+      done: false, completed_at: null, parent_id: null, sort: Date.now(), created_by: me.id,
+    };
+    rows.push({ ...row, created_at: new Date().toISOString() });
+    render();
+    sb.from("team_tasks").insert(row).then(({ error }) => {
+      if (!error) return;
+      setStatus("Couldn't add that task. " + (error.message || ""), "err");
+      reloadSoon();
+    });
+  }
+  const isOwn = (t) => !t.source_id && me && t.created_by === me.id;
+  function deleteOwnTask(t) {
+    rows = rows.filter(r => r.id !== t.id);
+    render();
+    sb.from("team_tasks").delete().eq("id", t.id).then(({ error }) => {
+      if (!error) return;
+      setStatus("Couldn't delete that task. " + (error.message || ""), "err");
+      reloadSoon();
+    });
+  }
+  $("add-input").addEventListener("input", () => { $("add-btn").disabled = !$("add-input").value.trim(); });
+  $("add-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const v = $("add-input").value.trim();
+    if (!v) return;
+    addOwnTask(v);
+    $("add-input").value = "";
+    $("add-btn").disabled = true;
+    $("add-input").focus();
+  });
 
   // ---- Tags (same look as ProTracker: lowercase words, a colour per tag) ----
   const tagsOf = (t) => Array.isArray(t.tags) ? t.tags : [];
@@ -570,13 +628,25 @@
       });
       li.querySelector(".task-body").append(box);
     }
-    if (t.done && t.completed_at) {
+    const meta = [];
+    if (!t.source_id) meta.push(isAdmin ? "Added by them" : "Added by you");
+    if (t.done && t.completed_at) meta.push("Done " + new Date(t.completed_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }));
+    if (meta.length) {
       const m = document.createElement("div");
       m.className = "meta";
-      m.textContent = "Done " + new Date(t.completed_at).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      m.textContent = meta.join(" · ");
       li.querySelector(".task-body").append(m);
     }
     li.querySelector(".check").onclick = () => toggleDone(t);
+    if (isOwn(t)) {
+      const del = document.createElement("button");
+      del.type = "button";
+      del.className = "del";
+      del.setAttribute("aria-label", `Delete “${t.title}”`);
+      del.innerHTML = `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M8 6V4h4v2M6 6l.8 10h6.4L14 6"/></svg>`;
+      del.onclick = () => deleteOwnTask(t);
+      li.append(del);
+    }
     return li;
   }
 
@@ -621,13 +691,15 @@
     $("progress").hidden = !shown.length;
     $("progress-fill").style.width = pct + "%";
     $("progress").setAttribute("aria-valuenow", String(pct));
+    $("add-form").hidden = isAdmin || !curPerson;
+    $("add-input").placeholder = tagFilter && tagFilter !== NO_TAG ? `Add a task of your own to #${tagFilter}` : "Add a task of your own… #tag to tag it";
     $("list-hint").textContent = isAdmin
-      ? "To change this list, edit the tasks in ProTracker and publish again. Ticks made here are kept."
-      : "Tick a task when it's done. New tasks appear here when they're shared with you.";
+      ? "Publishing from ProTracker updates the tasks you pushed; tasks they added themselves stay as they are. Ticks made here are kept."
+      : "Tick a task when it's done. Tasks you add stay here and aren't sent to ProTracker; the team's owner can see them.";
     const ul = $("task-list");
     ul.replaceChildren();
     if (!curPerson) { ul.append(emptyRow("No people yet", "In ProTracker, open People, pick someone, add their email and tap Publish to team.")); return; }
-    if (!mine.length) { ul.append(emptyRow("No tasks yet", isAdmin ? "Publish from ProTracker to add tasks here." : "Tasks shared with you will show up here.")); return; }
+    if (!mine.length) { ul.append(emptyRow("No tasks yet", isAdmin ? "Publish from ProTracker to add tasks here." : "Tasks shared with you will show up here. You can also add your own above.")); return; }
     open.forEach(t => ul.append(taskRow(t)));
     if (done.length) {
       const h = document.createElement("li");
