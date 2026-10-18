@@ -106,9 +106,7 @@
   .paste-box { display: flex; gap: 8px; }
   details.paste summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; }
   details.paste[open] summary { margin-bottom: 8px; }
-  .sync-box { display: grid; gap: 10px; }
   .head-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .sync-out { font: inherit; font-size: 0.85rem; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px; width: 100%; }
 
   /* Down the left: People (owner only) and the shown person's Tags; their tasks for the chosen tag on the right */
   .layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 20px; align-items: start; }
@@ -268,7 +266,6 @@
         <h2 id="list-title">My tasks</h2>
         <div class="head-right">
           <span class="sub" id="list-sub"></span>
-          <button class="act" id="copy-ticks" type="button" hidden>Copy ticks for ProTracker</button>
         </div>
       </div>
       <div class="progress" id="progress" role="progressbar" aria-label="Tasks done" aria-valuemin="0" aria-valuemax="100" hidden><div class="progress-fill" id="progress-fill"></div></div>
@@ -278,19 +275,6 @@
       </form>
       <ul class="list" id="task-list" aria-live="polite"></ul>
       <p class="hint" id="list-hint"></p>
-      <details class="paste" id="sync" hidden>
-        <summary>Show team ticks in ProTracker</summary>
-        <div class="sync-box">
-          <p class="hint">Tap <strong>Copy ticks for ProTracker</strong> (top right), then in ProTracker go to People → any person → <strong>Paste team ticks</strong>. ProTracker shows each tick as “✓ name”, separately from your own ticks. It copies everyone's ticks at once.</p>
-          <p class="hint">A sync key lets ProTracker fetch ticks by itself, but only where it's allowed to reach this database, which claude.ai currently blocks. Creating a new key disconnects the old one.</p>
-          <div class="row">
-            <button class="act quiet" id="sync-create" type="button">Create sync key</button>
-            <button class="act quiet" id="sync-copy-progress" type="button">Copy ticks for ProTracker</button>
-          </div>
-          <input id="sync-key" class="sync-out" type="text" readonly hidden aria-label="Sync key">
-          <p class="hint" id="sync-msg"></p>
-        </div>
-      </details>
       <details class="paste" id="paste" hidden>
         <summary>Paste a publish link from ProTracker</summary>
         <form class="paste-box" id="paste-form" autocomplete="off">
@@ -479,65 +463,6 @@
     if (remove.length) parts.push(`${remove.length} removed`);
     return { email, name, label: name || email, parts };
   }
-
-  // ---- Owner: send team ticks back to ProTracker ----
-  const toB64url = (bytes) => {
-    let s = "";
-    for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-    return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  };
-  async function copyText(text) {
-    try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
-  }
-  // Shows text in the box, selected, for copying by hand when the clipboard isn't available.
-  function showForCopy(text) {
-    const box = $("sync-key");
-    box.value = text;
-    box.hidden = false;
-    box.focus();
-    box.select();
-  }
-  $("sync-create").addEventListener("click", async () => {
-    $("sync-create").disabled = true;
-    const { data, error } = await sb.rpc("create_sync_key");
-    $("sync-create").disabled = false;
-    if (error || typeof data !== "string") {
-      $("sync-msg").textContent = /create_sync_key/.test((error && error.message) || "")
-        ? "The database needs the sync step: run team/schema.sql again in the Supabase SQL Editor, then try again."
-        : "Couldn't create a key: " + ((error && error.message) || "unknown error");
-      return;
-    }
-    const copied = await copyText(data);
-    showForCopy(data);
-    $("sync-msg").textContent = (copied ? "Key copied. " : "Copy this key. ")
-      + "In ProTracker, open People, pick anyone, and paste it under Team ticks. Keep it private: it lets ProTracker read who ticked what.";
-  });
-  // ProTracker can't reach the database from claude.ai, so ticks travel as a code: a snapshot of every published tick.
-  async function copyTicks() {
-    const items = rows.filter(r => r.source_id && r.done)
-      .map(r => [r.source_id, r.assignee_email, Date.parse(r.completed_at || "") || 0]);
-    const raw = new TextEncoder().encode(JSON.stringify({ v: 1, at: Date.now(), items }));
-    let code = "pj." + toB64url(raw);
-    if (typeof CompressionStream === "function") {
-      try {
-        const st = new Blob([raw]).stream().pipeThrough(new CompressionStream("deflate-raw"));
-        code = "pz." + toB64url(new Uint8Array(await new Response(st).arrayBuffer()));
-      } catch {}
-    }
-    const copied = await copyText(code);
-    const what = `${items.length} ticked ${items.length === 1 ? "task" : "tasks"}`;
-    if (copied) {
-      $("sync-key").hidden = true;
-      $("sync-msg").textContent = "";
-      setStatus(`Ticks copied (${what}). In ProTracker, open People and tap Paste team ticks.`, "ok");
-    } else {
-      $("sync").open = true;
-      showForCopy(code);
-      $("sync-msg").textContent = `Copy this code (${what}) and paste it in ProTracker under Team ticks.`;
-    }
-  }
-  $("sync-copy-progress").addEventListener("click", copyTicks);
-  $("copy-ticks").addEventListener("click", copyTicks);
 
   $("blocked-switch").addEventListener("click", async () => { $("blocked").hidden = true; await sb.auth.signOut(); });
   $("blocked-dismiss").addEventListener("click", () => { ssSet("team.publish", null); $("blocked").hidden = true; });
@@ -881,8 +806,6 @@
     curPerson = isAdmin ? lsGet("team.person", null) : me.email;
     $("people-group").hidden = !isAdmin;
     $("paste").hidden = !isAdmin;
-    $("sync").hidden = !isAdmin;
-    $("copy-ticks").hidden = !isAdmin;
     tagFilter = lsGet("team.tag", null);
     $("wrap").classList.remove("narrow");
     $("app").hidden = false;
