@@ -35,11 +35,12 @@ Supabase's built-in email sender only sends a few emails per hour, which is fine
 
 ## Publishing
 
-1. In ProTracker, go to People → pick a person → enter their email → **Publish to team**.
-2. The team app opens in a new tab and applies the push right away. Sign in as the owner first if it asks.
-3. If the new tab doesn't open, tap **Copy link** in ProTracker instead. Then, in the team app, open "Paste a publish link from ProTracker" and paste it there.
+1. In ProTracker, go to People and give each person who uses the team app their email.
+2. Tap **Publish to team** (under any person). One tap publishes to everyone with an email; people without one are listed as not included.
+3. The team app opens in a new tab and applies the push right away, for each person. Sign in as the owner first if it asks.
+4. If the new tab doesn't open, tap **Copy link** in ProTracker instead. Then, in the team app, open "Paste a publish link from ProTracker" and paste it there.
 
-What a push does, for that one person:
+What a push does, for each person in it:
 - Their list becomes exactly the tasks assigned to them in ProTracker (Repo excluded), in ProTracker's order, with subtasks right after their parent.
 - New tasks are added; existing ones take any new name and tags. Ticks they made are kept.
 - Tags show as coloured chips on each task, and a Tags column on the left (like ProTracker's Tree view) shows one tag's tasks at a time.

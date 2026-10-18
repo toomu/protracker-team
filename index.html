@@ -346,9 +346,10 @@
     el.hidden = !text;
   }
 
-  // ---- Publish links: ProTracker packs a person's tasks into the link's #publish= part ----
+  // ---- Publish links: ProTracker packs everyone's tasks into the link's #publish= part ----
   // "z." + base64url(deflate-raw(JSON)), or "j." + base64url(JSON) where compression isn't available.
-  // JSON: {v: 1, email, name, tasks: [{sid, title, done, tags[], parent (sid|null), order}]}
+  // JSON: {v: 2, people: [{email, name, tasks: [{sid, title, done, tags[], parent (sid|null), order}]}]}
+  // Older links carry one person: {v: 1, email, name, tasks}.
   const fromB64url = (s) => {
     const b = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
     return Uint8Array.from(b, c => c.charCodeAt(0));
@@ -361,8 +362,9 @@
       bytes = new Uint8Array(await new Response(stream).arrayBuffer());
     } else if (kind !== "j.") throw new Error("unknown format");
     const p = JSON.parse(new TextDecoder().decode(bytes));
-    if (!p || p.v !== 1 || !validEmail(normEmail(p.email)) || !Array.isArray(p.tasks)) throw new Error("bad payload");
-    return p;
+    const list = p && p.v === 1 ? [p] : p && p.v === 2 && Array.isArray(p.people) ? p.people : null;
+    if (!list || !list.length || list.some(x => !x || !validEmail(normEmail(x.email)) || !Array.isArray(x.tasks))) throw new Error("bad payload");
+    return list;
   }
   // The link may arrive before sign-in, so it waits in sessionStorage until the owner is signed in.
   function takePublishFromUrl() {
@@ -404,58 +406,22 @@
       return;
     }
     $("blocked").hidden = true;
-    let p;
-    try { p = await decodePublish(code); }
+    let list;
+    try { list = await decodePublish(code); }
     catch { ssSet("team.publish", null); setStatus("That publish link looks damaged. Publish again from ProTracker.", "err"); return; }
     publishing = true;
-    const email = normEmail(p.email);
-    const name = String(p.name || "").slice(0, 60);
-    setStatus(`Publishing to ${name || email}…`);
+    const done = [];
     try {
-      const { data: current, error: readErr } = await sb.from("team_tasks").select("*").eq("assignee_email", email);
-      if (readErr) throw readErr;
-      const bySid = new Map((current || []).filter(r => r.source_id).map(r => [r.source_id, r]));
-      const incoming = flatOrder(p.tasks.filter(t => t && typeof t.sid === "string" && typeof t.title === "string" && t.title.trim()));
-      const now = new Date().toISOString();
-      const add = [], update = [];
-      let renamed = 0, retagged = 0;
-      incoming.forEach((t, k) => {
-        const title = t.title.replace(/\s+/g, " ").trim().slice(0, 300);
-        const tags = cleanTags(t.tags);
-        const old = bySid.get(t.sid);
-        if (!old) {
-          add.push({ id: uuid(), assignee_email: email, source_id: t.sid, title, tags, done: !!t.done, completed_at: t.done ? now : null, parent_id: null, sort: k, created_by: me.id });
-        } else if (old.title !== title || old.sort !== k || old.parent_id || tagsOf(old).join(" ") !== tags.join(" ")) {
-          if (old.title !== title) renamed++;
-          if (tagsOf(old).join(" ") !== tags.join(" ")) retagged++;
-          update.push([old.id, { title, tags, sort: k, parent_id: null }]);
-        }
-      });
-      const keep = new Set(incoming.map(t => t.sid));
-      const remove = (current || []).filter(r => r.source_id && !keep.has(r.source_id)).map(r => r.id);
-      if (add.length) {
-        const { error } = await sb.from("team_tasks").insert(add);
-        if (error) throw error;
-      }
-      for (const [id, patch] of update) {
-        const { error } = await sb.from("team_tasks").update(patch).eq("id", id);
-        if (error) throw error;
-      }
-      if (remove.length) {
-        const { error } = await sb.from("team_tasks").delete().in("id", remove);
-        if (error) throw error;
+      for (const p of list) {
+        setStatus(`Publishing to ${String(p.name || "").slice(0, 60) || normEmail(p.email)}…`);
+        done.push(await publishOne(p));
       }
       ssSet("team.publish", null);
-      if (name) lsSet("team.names", { ...names(), [email]: name });
-      curPerson = email;
-      lsSet("team.person", email);
+      lsSet("team.names", { ...names(), ...Object.fromEntries(done.filter(r => r.name).map(r => [r.email, r.name])) });
+      if (done.length === 1 || !curPerson) { curPerson = done[0].email; lsSet("team.person", curPerson); }
       await loadRows();
-      const parts = [`${incoming.length} ${incoming.length === 1 ? "task" : "tasks"}`];
-      if (add.length) parts.push(`${add.length} new`);
-      if (renamed) parts.push(`${renamed} renamed`);
-      if (retagged) parts.push(`${retagged} with new tags`);
-      if (remove.length) parts.push(`${remove.length} removed`);
-      setStatus(`Published to ${name || email}: ${parts.join(", ")}.`, "ok");
+      setStatus(done.length === 1 ? `Published to ${done[0].label}: ${done[0].parts.join(", ")}.`
+        : `Published to ${done.length} people: ` + done.map(r => `${r.label} (${r.parts.join(", ")})`).join("; ") + ".", "ok");
     } catch (e) {
       // The link stays saved, so reloading tries again; tasks already sent aren't duplicated.
       // PGRST204 naming "tags": the database predates tags; re-running schema.sql adds the column.
@@ -468,6 +434,52 @@
       publishing = false;
     }
   }
+
+  // One person's push. Returns what changed, for the status line.
+  async function publishOne(p) {
+    const email = normEmail(p.email);
+    const name = String(p.name || "").slice(0, 60);
+    const { data: current, error: readErr } = await sb.from("team_tasks").select("*").eq("assignee_email", email);
+    if (readErr) throw readErr;
+    const bySid = new Map((current || []).filter(r => r.source_id).map(r => [r.source_id, r]));
+    const incoming = flatOrder(p.tasks.filter(t => t && typeof t.sid === "string" && typeof t.title === "string" && t.title.trim()));
+    const now = new Date().toISOString();
+    const add = [], update = [];
+    let renamed = 0, retagged = 0;
+    incoming.forEach((t, k) => {
+      const title = t.title.replace(/\s+/g, " ").trim().slice(0, 300);
+      const tags = cleanTags(t.tags);
+      const old = bySid.get(t.sid);
+      if (!old) {
+        add.push({ id: uuid(), assignee_email: email, source_id: t.sid, title, tags, done: !!t.done, completed_at: t.done ? now : null, parent_id: null, sort: k, created_by: me.id });
+      } else if (old.title !== title || old.sort !== k || old.parent_id || tagsOf(old).join(" ") !== tags.join(" ")) {
+        if (old.title !== title) renamed++;
+        if (tagsOf(old).join(" ") !== tags.join(" ")) retagged++;
+        update.push([old.id, { title, tags, sort: k, parent_id: null }]);
+      }
+    });
+    const keep = new Set(incoming.map(t => t.sid));
+    const remove = (current || []).filter(r => r.source_id && !keep.has(r.source_id)).map(r => r.id);
+    if (add.length) {
+      const { error } = await sb.from("team_tasks").insert(add);
+      if (error) throw error;
+    }
+    for (const [id, patch] of update) {
+      const { error } = await sb.from("team_tasks").update(patch).eq("id", id);
+      if (error) throw error;
+    }
+    if (remove.length) {
+      const { error } = await sb.from("team_tasks").delete().in("id", remove);
+      if (error) throw error;
+    }
+    const parts = [`${incoming.length} ${incoming.length === 1 ? "task" : "tasks"}`];
+    if (add.length) parts.push(`${add.length} new`);
+    if (renamed) parts.push(`${renamed} renamed`);
+    if (retagged) parts.push(`${retagged} with new tags`);
+    if (remove.length) parts.push(`${remove.length} removed`);
+    return { email, name, label: name || email, parts };
+  }
+
   // ---- Owner: send team ticks back to ProTracker ----
   const toB64url = (bytes) => {
     let s = "";
@@ -797,7 +809,7 @@
       : "Tick a task when it's done. Tasks you add stay here and aren't sent to ProTracker; the team's owner can see them.";
     const ul = $("task-list");
     ul.replaceChildren();
-    if (!curPerson) { ul.append(emptyRow("No people yet", "In ProTracker, open People, pick someone, add their email and tap Publish to team.")); return; }
+    if (!curPerson) { ul.append(emptyRow("No people yet", "In ProTracker, open People, add people's emails and tap Publish to team.")); return; }
     if (!mine.length) { ul.append(emptyRow("No tasks yet", isAdmin ? "Publish from ProTracker to add tasks here." : "Tasks shared with you will show up here. You can also add your own above.")); return; }
     open.forEach(t => ul.append(taskRow(t)));
     if (done.length) {
