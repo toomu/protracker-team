@@ -160,6 +160,8 @@
   .task-body { flex: 1; min-width: 0; display: grid; gap: 2px; }
   .title { overflow-wrap: anywhere; }
   .task.done .title { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 2px; }
+  .title a.link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+  .title a.link:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
   .meta { color: var(--muted); font-size: 0.8rem; }
   .tags { display: flex; flex-wrap: wrap; gap: 6px; }
   .chip {
@@ -691,11 +693,30 @@
     li.querySelector("span").textContent = body;
     return li;
   }
+  // Web addresses in a title show as links that open in a new tab (same rules as ProTracker).
+  const URL_RE = /\b(?:https?:\/\/|www\.)[^\s<>"]+/gi;
+  function showTitle(el, text) {
+    el.replaceChildren();
+    let last = 0;
+    for (const m of text.matchAll(URL_RE)) {
+      const url = m[0].replace(/[.,;:!?'")\]]+$/, "");   // leave closing punctuation outside the link
+      el.append(text.slice(last, m.index));
+      const a = document.createElement("a");
+      a.className = "link";
+      a.href = /^www\./i.test(url) ? "https://" + url : url;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.textContent = url;
+      el.append(a);
+      last = m.index + url.length;
+    }
+    el.append(text.slice(last));
+  }
   function taskRow(t) {
     const li = document.createElement("li");
     li.className = "task" + (t.done ? " done" : "");
     li.innerHTML = `<button class="check" type="button" aria-label="${t.done ? "Mark as not done" : "Mark as done"}">${CHECK}</button><div class="task-body"><div class="title"></div></div>`;
-    li.querySelector(".title").textContent = t.title;
+    showTitle(li.querySelector(".title"), t.title);
     if (tagsOf(t).length) {
       const box = document.createElement("div");
       box.className = "tags";
