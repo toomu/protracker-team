@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>ProTracker Team</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
@@ -72,8 +72,9 @@
     font-family: var(--font-body);
     font-size: 17px;
     line-height: 1.45;
-    padding-inline: 16px;
+    padding-inline: max(16px, env(safe-area-inset-left)) max(16px, env(safe-area-inset-right));
     -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
   }
   .wrap { max-width: 1000px; margin: 0 auto; padding-block: max(20px, env(safe-area-inset-top)) 64px; display: grid; gap: 20px; }
   .wrap.narrow { max-width: 720px; }
@@ -82,8 +83,23 @@
   h1 { font-family: var(--font-display); font-weight: 800; font-size: 1.35rem; letter-spacing: -0.02em; margin: 0; line-height: 1; }
   h1 { display: flex; align-items: center; gap: 10px; }
   h1 .logo { height: 1.7rem; width: auto; flex: none; }
-  .who-am-i { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 0.9rem; min-width: 0; }
-  .who-am-i span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .account { position: relative; min-width: 0; }
+  .account summary {
+    list-style: none; display: flex; align-items: center; gap: 10px; cursor: pointer; min-height: 44px;
+    color: var(--muted); font-size: 0.9rem; border-radius: 999px; padding: 4px 12px 4px 4px;
+    border: 1px solid var(--line); background: var(--sheet);
+  }
+  .account summary::-webkit-details-marker { display: none; }
+  .account summary:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .account summary .av { --c: var(--accent); width: 34px; height: 34px; font-size: 0.9rem; }
+  .who-email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+  .account-menu {
+    position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 240px; max-width: calc(100vw - 32px);
+    background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px;
+    display: grid; gap: 10px; box-shadow: 0 10px 30px color-mix(in srgb, var(--ink) 18%, transparent);
+  }
+  .account-menu .hint { overflow-wrap: anywhere; }
+  .quiet-btn { background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
 
   .btn {
     font: inherit; font-weight: 700; border: 0; border-radius: 10px; cursor: pointer;
@@ -151,13 +167,31 @@
 
   .main { display: grid; gap: 12px; min-width: 0; }
   .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-  .section-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 1.15rem; margin: 0; overflow-wrap: anywhere; }
+  .section-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 1.15rem; margin: 0; overflow-wrap: anywhere; min-width: 0; }
+  /* The list title; on phones it becomes the button that opens the People and Tags sheet */
+  .picker { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: left; display: inline-flex; align-items: center; gap: 6px; cursor: default; max-width: 100%; }
+  .picker .chev { display: none; width: 16px; height: 16px; flex: none; color: var(--muted); }
+  .scrim, .sheet-grip, .ptr { display: none; }
   .section-head .sub { color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
   .progress { height: 8px; border-radius: 999px; background: var(--sheet); border: 1px solid var(--line); overflow: hidden; }
   .progress-fill { height: 100%; width: 0; background: var(--done); border-radius: 999px; }
 
   ul.list { list-style: none; margin: 0; padding: 0; background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
-  li.task { display: flex; align-items: center; gap: 12px; padding: 8px 14px; border-top: 1px solid var(--line); min-height: 56px; }
+  li.task { position: relative; border-top: 1px solid var(--line); touch-action: pan-y; overflow: hidden; --dx: 0px; }
+  /* Swipe a row: right ticks it, left deletes it (your own tasks). The row slides over a coloured label. */
+  .task-inner {
+    position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; padding: 8px 14px; min-height: 56px;
+    background: var(--sheet); transform: translateX(var(--dx));
+  }
+  li.task.settle .task-inner { transition: transform 0.2s ease; }
+  li.task::before, li.task::after {
+    position: absolute; inset: 0; display: flex; align-items: center; padding: 0 20px;
+    font-weight: 700; font-size: 0.9rem; color: var(--sheet); visibility: hidden;
+  }
+  li.task::before { content: "✓ Done"; background: var(--done); }
+  li.task.done::before { content: "↺ Not done"; background: var(--muted); }
+  li.task::after { content: "Delete"; justify-content: flex-end; background: var(--danger); }
+  li.task.sw-r::before, li.task.sw-l.own::after { visibility: visible; }
   li.task:first-child { border-top: 0; }
   .check {
     flex: none; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--muted);
@@ -202,15 +236,54 @@
   .del svg { width: 18px; height: 18px; }
   .empty { text-align: center; color: var(--muted); padding: 28px 20px; display: grid; gap: 4px; }
   .empty strong { color: var(--ink); font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; }
-  @media (max-width: 720px) {
-    .layout { grid-template-columns: 1fr; }
-    .side { position: static; max-height: none; gap: 6px; }
-    .side-group { display: flex; gap: 6px; overflow-x: auto; }
-    #people-group:not([hidden]) + #tags-group { margin-top: 0; }
-    .side h2, .side .hint { display: none; }
-    .person-item { width: auto; flex: none; white-space: nowrap; }
-    .person-item .email { display: none; }
+  .toast {
+    position: fixed; z-index: 40; left: 50%; transform: translateX(-50%);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 16px + var(--bottom-ui, 0px));
+    width: max-content; max-width: calc(100vw - 32px); display: flex; align-items: center; gap: 12px;
+    background: var(--ink); color: var(--paper); border-radius: 12px; padding: 6px 6px 6px 16px; font-size: 0.95rem;
+    box-shadow: 0 8px 24px color-mix(in srgb, var(--ink) 25%, transparent);
   }
+  #toast-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .toast-undo { font: inherit; font-weight: 700; color: var(--accent-soft); background: none; border: 0; min-height: 40px; padding: 0 12px; border-radius: 8px; cursor: pointer; flex: none; }
+  .toast-undo:focus-visible { outline: 3px solid var(--accent-soft); }
+
+  /* Phones: full-width list, People and Tags in a bottom sheet, the add box pinned above the thumb */
+  @media (max-width: 720px) {
+    .wrap { padding-bottom: calc(40px + var(--bottom-ui, 0px) + env(safe-area-inset-bottom, 0px)); gap: 16px; }
+    .who-email { display: none; }
+    .account summary { padding: 4px; }
+    .layout { grid-template-columns: 1fr; }
+    .picker.can { cursor: pointer; min-height: 44px; padding: 6px 12px; background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; }
+    .picker.can .chev { display: block; }
+    .picker:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    .side {
+      position: fixed; z-index: 35; left: 0; right: 0; bottom: 0; top: auto; max-height: min(78vh, 640px);
+      border-radius: 20px 20px 0 0; border-bottom: 0; padding: 6px 12px calc(16px + env(safe-area-inset-bottom, 0px));
+      padding-inline: max(12px, env(safe-area-inset-left)) max(12px, env(safe-area-inset-right));
+      transform: translateY(100%); visibility: hidden; transition: transform 0.25s ease, visibility 0s 0.25s;
+      box-shadow: 0 -10px 30px color-mix(in srgb, var(--ink) 20%, transparent); overscroll-behavior: contain;
+    }
+    body.sheet-open .side { transform: none; visibility: visible; transition: transform 0.25s ease; }
+    body.sheet-open { overflow: hidden; }
+    body.has-add { --bottom-ui: 68px; }
+    .sheet-grip { display: block; width: 40px; height: 5px; border-radius: 999px; background: var(--line); margin: 4px auto 8px; }
+    .scrim { display: block; position: fixed; inset: 0; z-index: 34; background: color-mix(in srgb, var(--ink) 40%, transparent); }
+    .add-form {
+      position: fixed; z-index: 30; left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right));
+      bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+      box-shadow: 0 6px 24px color-mix(in srgb, var(--ink) 16%, transparent);
+    }
+    .ptr {
+      display: grid; place-items: center; position: fixed; z-index: 25; left: 50%; top: 0; width: 40px; height: 40px; margin-left: -20px;
+      border-radius: 50%; background: var(--sheet); color: var(--accent); border: 1px solid var(--line);
+      transform: translateY(calc(var(--pull, 0px) - 48px)) rotate(calc(var(--pull, 0px) * 2.5)); opacity: 0; pointer-events: none;
+    }
+    .ptr.on { opacity: 1; }
+    .ptr.spin { transform: translateY(calc(env(safe-area-inset-top, 0px) + 16px)); }
+    .ptr.spin svg { animation: ptr-spin 0.8s linear infinite; }
+    .ptr svg { width: 20px; height: 20px; }
+  }
+  @keyframes ptr-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: no-preference) {
     .check { transition: background-color 0.15s, border-color 0.15s; }
     .progress-fill { transition: width 0.3s ease; }
@@ -221,10 +294,14 @@
 <div class="wrap narrow" id="wrap">
   <header>
     <h1><img class="logo" src="logo.png" alt="" width="68" height="120">ProTracker Team</h1>
-    <div class="who-am-i" id="who" hidden>
-      <span id="who-email"></span>
-      <button class="act quiet" id="sign-out" type="button">Sign out</button>
-    </div>
+    <!-- Account: an initial (plus the email on wider screens); tap for Sign out -->
+    <details class="account" id="who" hidden>
+      <summary aria-label="Account"><span class="av" id="who-av" aria-hidden="true"></span><span class="who-email" id="who-email"></span></summary>
+      <div class="account-menu">
+        <p class="hint" id="who-full"></p>
+        <button class="btn quiet-btn" id="sign-out" type="button">Sign out</button>
+      </div>
+    </details>
   </header>
 
   <p class="status" id="status" role="status">Loading…</p>
@@ -262,7 +339,9 @@
   </section>
 
   <section class="layout" id="app" hidden>
+    <!-- On wide screens a column on the left; on phones a sheet that slides up from the picker button -->
     <nav class="side" id="side" aria-label="People and tags">
+      <div class="sheet-grip" aria-hidden="true"></div>
       <div class="side-group" id="people-group" hidden>
         <h2>People</h2>
         <div id="people-items"></div>
@@ -274,7 +353,7 @@
     </nav>
     <section class="main" aria-labelledby="list-title">
       <div class="section-head">
-        <h2 id="list-title">My tasks</h2>
+        <h2><button class="picker" id="picker" type="button" aria-controls="side" aria-expanded="false"><span id="list-title">My tasks</span><svg class="chev" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg></button></h2>
         <div class="head-right">
           <span class="sub" id="list-sub"></span>
         </div>
@@ -296,6 +375,9 @@
     </section>
   </section>
 </div>
+<div class="scrim" id="scrim" hidden></div>
+<div class="ptr" id="ptr" aria-hidden="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 4v12M5 11l5 5 5-5"/></svg></div>
+<div class="toast" id="toast" role="status" hidden><span id="toast-text"></span><button class="toast-undo" id="toast-undo" type="button">Undo</button></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script>
@@ -489,8 +571,21 @@
   });
 
   // ---- Data ----
+  // The last list is kept on this device, so the app opens with it when there's no connection.
+  const cacheKey = () => "team.cache." + (me ? me.id : "");
   async function loadRows() {
-    const { data, error } = await sb.from("team_tasks").select("*");
+    let data, error;
+    try { ({ data, error } = await sb.from("team_tasks").select("*")); } catch (e) { error = e || new Error("network"); }
+    if (error && isNetErr(error)) {
+      const c = lsGet(cacheKey(), null);
+      if (c) {
+        rows = applyQueue(c.rows || []);
+        render();
+        setStatus("You're offline, showing your list from " + new Date(c.at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })
+          + ". Changes are sent when you're back online.");
+      } else setStatus("You're offline. Connect to the internet to load your tasks.", "err");
+      return;
+    }
     if (error) {
       // PGRST205: the table doesn't exist, so schema.sql hasn't been run in this Supabase project.
       setStatus(error.code === "PGRST205"
@@ -498,22 +593,89 @@
         : "Couldn't load tasks. Check your connection and reload.", "err");
       return;
     }
-    rows = data || [];
-    if ($("status").textContent === "Loading your tasks…") setStatus("");
+    lsSet(cacheKey(), { rows: data || [], at: Date.now() });
+    rows = applyQueue(data || []);
+    if (["Loading your tasks…", "Refreshing…"].includes($("status").textContent) || /^You're offline/.test($("status").textContent)) setStatus("");
     render();
   }
   let reloadTimer = 0;
   const reloadSoon = () => { clearTimeout(reloadTimer); reloadTimer = setTimeout(loadRows, 300); };
 
-  // A tick shows at once, then goes to the server; a refusal reloads the real state.
-  function toggleDone(t) {
+  // ---- Writes: shown at once, then sent. Without a connection they wait in a queue on this device
+  // (localStorage, per user) and go out in order when the connection is back. A refusal reloads the real state.
+  const qKey = () => "team.queue." + (me ? me.id : "");
+  const queue = () => lsGet(qKey(), []);
+  const isNetErr = (e) => !navigator.onLine || /fetch|network|load failed|timed? ?out/i.test(String(e && e.message || e || ""));
+  function runOp(op) {
+    const q = sb.from("team_tasks");
+    if (op.op === "update") return q.update(op.patch).eq("id", op.id);
+    if (op.op === "insert") return q.insert(op.row);
+    return q.delete().eq("id", op.id);
+  }
+  async function tryOp(op) {
+    try { return (await runOp(op)).error || null; } catch (e) { return e || new Error("network"); }
+  }
+  // Queued changes laid over what the server sent, so a reload before they go out doesn't undo them.
+  function applyQueue(list) {
+    let out = list.slice();
+    queue().forEach(op => {
+      if (op.op === "update") out = out.map(r => r.id === op.id ? { ...r, ...op.patch } : r);
+      else if (op.op === "insert") { if (!out.some(r => r.id === op.row.id)) out.push({ ...op.row, created_at: new Date().toISOString() }); }
+      else out = out.filter(r => r.id !== op.id);
+    });
+    return out;
+  }
+  const OFFLINE = "You're offline. Changes are kept on this device and sent when you're back online.";
+  async function write(op, failText) {
+    if (queue().length) { lsSet(qKey(), [...queue(), op]); flushQueue(); return; }   // keep the order
+    const error = await tryOp(op);
+    if (!error) return;
+    if (isNetErr(error)) { lsSet(qKey(), [...queue(), op]); setStatus(OFFLINE); return; }
+    setStatus(failText + " " + (error.message || ""), "err");
+    reloadSoon();
+  }
+  let flushing = false;
+  async function flushQueue() {
+    if (flushing || !me || !queue().length) return;
+    flushing = true;
+    let sent = false;
+    try {
+      while (queue().length) {
+        const error = await tryOp(queue()[0]);
+        if (error && isNetErr(error)) { setStatus(OFFLINE); return; }
+        lsSet(qKey(), queue().slice(1));   // sent, or refused by the server (then the reload shows the real state)
+        sent = true;
+      }
+    } finally { flushing = false; }
+    if (sent) { if ($("status").textContent === OFFLINE) setStatus(""); reloadSoon(); }
+  }
+  window.addEventListener("online", () => { if (me) { flushQueue(); reloadSoon(); } });
+  window.addEventListener("offline", () => { if (me) setStatus(OFFLINE); });
+
+  // ---- Toast with Undo (after a tick or a delete) ----
+  let toastTimer = 0, toastUndo = null;
+  function toast(text, undo) {
+    clearTimeout(toastTimer);
+    toastUndo = undo || null;
+    $("toast-text").textContent = text;
+    $("toast-undo").hidden = !undo;
+    $("toast").hidden = false;
+    toastTimer = setTimeout(hideToast, 5000);
+  }
+  function hideToast() { clearTimeout(toastTimer); $("toast").hidden = true; toastUndo = null; }
+  $("toast-undo").addEventListener("click", () => { const u = toastUndo; hideToast(); if (u) u(); });
+  const buzz = () => { try { navigator.vibrate && navigator.vibrate(12); } catch {} };
+  const short = (title) => title.length > 40 ? title.slice(0, 38) + "…" : title;
+
+  function toggleDone(t, quiet) {
     const patch = { done: !t.done, completed_at: t.done ? null : new Date().toISOString() };
     rows = rows.map(r => r.id === t.id ? { ...r, ...patch } : r);
     render();
-    sb.from("team_tasks").update(patch).eq("id", t.id).then(({ error }) => {
-      if (!error) return;
-      setStatus("Couldn't save that tick. It's been undone. " + (error.message || ""), "err");
-      reloadSoon();
+    buzz();
+    write({ op: "update", id: t.id, patch }, "Couldn't save that tick. It's been undone.");
+    if (!quiet) toast((patch.done ? "Done: " : "Not done: ") + short(t.title), () => {
+      const now = rows.find(r => r.id === t.id);
+      if (now && now.done === patch.done) toggleDone(now, true);
     });
   }
 
@@ -532,20 +694,21 @@
     };
     rows.push({ ...row, created_at: new Date().toISOString() });
     render();
-    sb.from("team_tasks").insert(row).then(({ error }) => {
-      if (!error) return;
-      setStatus("Couldn't add that task. " + (error.message || ""), "err");
-      reloadSoon();
-    });
+    write({ op: "insert", row }, "Couldn't add that task.");
   }
   const isOwn = (t) => !t.source_id && me && t.created_by === me.id;
   function deleteOwnTask(t) {
     rows = rows.filter(r => r.id !== t.id);
     render();
-    sb.from("team_tasks").delete().eq("id", t.id).then(({ error }) => {
-      if (!error) return;
-      setStatus("Couldn't delete that task. " + (error.message || ""), "err");
-      reloadSoon();
+    buzz();
+    write({ op: "delete", id: t.id }, "Couldn't delete that task.");
+    // Undo puts the same row back (same id, tags, tick and place).
+    toast("Deleted: " + short(t.title), () => {
+      if (rows.some(r => r.id === t.id)) return;
+      const { created_at, updated_at, ...row } = t;
+      rows.push({ ...t });
+      render();
+      write({ op: "insert", row }, "Couldn't bring that task back.");
     });
   }
   $("add-input").addEventListener("input", () => { $("add-btn").disabled = !$("add-input").value.trim(); });
@@ -607,7 +770,40 @@
     renderList();
     // A member with no tasks yet has nothing to list on the left.
     $("side").hidden = $("people-group").hidden && $("tags-group").hidden;
+    $("picker").classList.toggle("can", !$("side").hidden);
+    if ($("side").hidden) closeSheet();
   }
+
+  // ---- Phones: People and Tags in a bottom sheet, opened from the list title ----
+  const phone = matchMedia("(max-width: 720px)");
+  function openSheet() {
+    if (!phone.matches || $("side").hidden) return;
+    document.body.classList.add("sheet-open");
+    $("scrim").hidden = false;
+    $("picker").setAttribute("aria-expanded", "true");
+    const cur = $("side").querySelector('[aria-current="true"]') || $("side").querySelector("button");
+    if (cur) cur.focus({ preventScroll: true });
+  }
+  function closeSheet() {
+    if (!document.body.classList.contains("sheet-open")) return;
+    document.body.classList.remove("sheet-open");
+    $("scrim").hidden = true;
+    $("picker").setAttribute("aria-expanded", "false");
+  }
+  $("picker").addEventListener("click", openSheet);
+  $("scrim").addEventListener("click", closeSheet);
+  phone.addEventListener("change", closeSheet);
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    if (document.body.classList.contains("sheet-open")) { closeSheet(); $("picker").focus(); }
+    else if ($("who").open) { $("who").open = false; $("who").querySelector("summary").focus(); }
+  });
+  // Dragging the sheet down closes it.
+  (() => {
+    let y0 = null;
+    $("side").addEventListener("touchstart", (e) => { y0 = $("side").scrollTop <= 0 ? e.touches[0].clientY : null; }, { passive: true });
+    $("side").addEventListener("touchmove", (e) => { if (y0 !== null && e.touches[0].clientY - y0 > 70) { y0 = null; closeSheet(); } }, { passive: true });
+  })();
 
   function renderSide(list) {
     const box = $("people-items");
@@ -662,8 +858,8 @@
   }
   function taskRow(t) {
     const li = document.createElement("li");
-    li.className = "task" + (t.done ? " done" : "");
-    li.innerHTML = `<button class="check" type="button" aria-label="${t.done ? "Mark as not done" : "Mark as done"}">${CHECK}</button><div class="task-body"><div class="title"></div></div>`;
+    li.className = "task" + (t.done ? " done" : "") + (isOwn(t) ? " own" : "");
+    li.innerHTML = `<div class="task-inner"><button class="check" type="button" aria-label="${t.done ? "Mark as not done" : "Mark as done"}">${CHECK}</button><div class="task-body"><div class="title"></div></div></div>`;
     showTitle(li.querySelector(".title"), t.title);
     if (tagsOf(t).length) {
       const box = document.createElement("div");
@@ -692,9 +888,48 @@
       del.setAttribute("aria-label", `Delete “${t.title}”`);
       del.innerHTML = `<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M8 6V4h4v2M6 6l.8 10h6.4L14 6"/></svg>`;
       del.onclick = () => deleteOwnTask(t);
-      li.append(del);
+      li.querySelector(".task-inner").append(del);
     }
+    swipe(li, t);
     return li;
+  }
+
+  // Touch swipe on a row: right past the line ticks it (or unticks), left deletes it if it's your own.
+  // Vertical drags stay scrolls (touch-action: pan-y); a swipe swallows the tap that follows it.
+  const SWIPE_AT = 90;
+  function swipe(li, t) {
+    let x0 = 0, y0 = 0, dx = 0, mode = "", id = null, swallow = false;
+    const set = (v) => { dx = v; li.style.setProperty("--dx", v + "px"); li.classList.toggle("sw-r", v > 0); li.classList.toggle("sw-l", v < 0); };
+    const reset = () => { li.classList.add("settle"); set(0); setTimeout(() => li.classList.remove("settle", "sw-r", "sw-l"), 220); };
+    li.addEventListener("pointerdown", (e) => {
+      if (e.pointerType !== "touch" || id !== null) return;
+      id = e.pointerId; x0 = e.clientX; y0 = e.clientY; mode = ""; li.classList.remove("settle");
+    });
+    li.addEventListener("pointermove", (e) => {
+      if (e.pointerId !== id) return;
+      const mx = e.clientX - x0, my = e.clientY - y0;
+      if (!mode) {
+        if (Math.abs(my) > 10 && Math.abs(my) > Math.abs(mx)) { mode = "scroll"; return; }
+        if (Math.abs(mx) > 12 && Math.abs(mx) > Math.abs(my) * 1.5) { mode = "swipe"; try { li.setPointerCapture(id); } catch {} }
+        else return;
+      }
+      if (mode !== "swipe") return;
+      // Left only goes far on your own tasks; otherwise it gives a little and springs back.
+      set(mx < 0 && !isOwn(t) ? Math.max(mx, -28) : mx);
+    });
+    const end = (e) => {
+      if (e.pointerId !== id) return;
+      id = null;
+      if (mode !== "swipe") return;
+      swallow = true;
+      setTimeout(() => { swallow = false; }, 350);
+      if (e.type === "pointerup" && dx > SWIPE_AT) { reset(); toggleDone(t); }
+      else if (e.type === "pointerup" && dx < -SWIPE_AT && isOwn(t)) { li.classList.add("settle"); set(-li.offsetWidth); setTimeout(() => deleteOwnTask(t), 180); }
+      else reset();
+    };
+    li.addEventListener("pointerup", end);
+    li.addEventListener("pointercancel", end);
+    li.addEventListener("click", (e) => { if (swallow) { e.stopPropagation(); e.preventDefault(); } }, true);
   }
 
   // The shown person's tags down the left: All, each tag (busiest first), then Untagged.
@@ -716,7 +951,7 @@
       b.innerHTML = '<span class="dot" aria-hidden="true"></span><span class="names"><span class="name"></span></span><span class="n"></span>';
       b.querySelector(".name").textContent = label;
       b.querySelector(".n").textContent = n;
-      b.onclick = () => { tagFilter = key; lsSet("team.tag", key); renderList(); };
+      b.onclick = () => { tagFilter = key; lsSet("team.tag", key); renderList(); closeSheet(); scrollTo({ top: 0 }); };
       box.append(b);
     };
     item(null, "All tasks", mine.length, "var(--accent)");
@@ -739,7 +974,9 @@
     $("progress-fill").style.width = pct + "%";
     $("progress").setAttribute("aria-valuenow", String(pct));
     $("add-form").hidden = isAdmin || !curPerson;
-    $("add-input").placeholder = tagFilter && tagFilter !== NO_TAG ? `Add a task of your own to #${tagFilter}` : "Add a task of your own… #tag to tag it";
+    document.body.classList.toggle("has-add", !$("add-form").hidden);
+    $("add-input").placeholder = tagFilter && tagFilter !== NO_TAG ? `Add a task to #${tagFilter}`
+      : phone.matches ? "Add a task… #tag" : "Add a task of your own… #tag to tag it";
     $("list-hint").textContent = isAdmin
       ? "Publishing from ProTracker updates the tasks you pushed; tasks they added themselves stay as they are. Ticks made here are kept."
       : "Tick a task when it's done. Tasks you add stay here and aren't sent to ProTracker; the team's owner can see them.";
@@ -771,12 +1008,23 @@
     codeEmail = email;
     $("email-form").hidden = true;
     $("code-form").hidden = false;
-    $("code-hint").textContent = `We sent a code to ${email}. It can take a minute; check spam too. You can also just tap the link in that email.`;
+    // An app added to the home screen keeps its own sign-in; the email's link opens the browser instead.
+    $("code-hint").textContent = standalone()
+      ? `We sent a code to ${email}. Type it here; don't tap the link in the email, it signs in your browser, not this app. It can take a minute; check spam too.`
+      : `We sent a code to ${email}. Type it here, or tap the link in that email. It can take a minute; check spam too.`;
     $("code").focus();
+  });
+  const standalone = () => matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+  // Digits only; signs in by itself once the whole code is there (pasted or autofilled).
+  let codeLen = 8;
+  $("code").addEventListener("input", () => {
+    const v = $("code").value.replace(/\D+/g, "").slice(0, 10);
+    if (v !== $("code").value) $("code").value = v;
+    if (v.length === codeLen && !$("verify").disabled) $("code-form").requestSubmit();
   });
   $("code-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const token = $("code").value.replace(/\s+/g, "");
+    const token = $("code").value.replace(/\D+/g, "");
     if (!token) return;
     $("verify").disabled = true;
     showError("signin-error", "");
@@ -790,7 +1038,8 @@
     $("code").value = "";
     showError("signin-error", "");
   });
-  $("sign-out").addEventListener("click", async () => { await sb.auth.signOut(); });
+  $("sign-out").addEventListener("click", async () => { $("who").open = false; await sb.auth.signOut(); });
+  document.addEventListener("click", (e) => { if ($("who").open && !$("who").contains(e.target)) $("who").open = false; });
 
   let channel = null;
   async function onSession(session) {
@@ -798,6 +1047,10 @@
       me = null; isAdmin = false; rows = [];
       if (channel) { sb.removeChannel(channel); channel = null; }
       $("who").hidden = true;
+      $("who").open = false;
+      document.body.classList.remove("has-add");
+      closeSheet();
+      hideToast();
       $("app").hidden = true;
       $("blocked").hidden = true;
       $("signin").hidden = false;
@@ -808,12 +1061,17 @@
     if (me && me.id === session.user.id) return;
     me = { id: session.user.id, email: normEmail(session.user.email) };
     $("who-email").textContent = me.email;
+    $("who-full").textContent = "Signed in as " + me.email;
+    $("who-av").textContent = (me.email.match(/[\p{L}\p{N}]/u) || ["?"])[0].toUpperCase();
     $("who").hidden = false;
     $("signin").hidden = true;
     $("code-form").hidden = true;
     $("email-form").hidden = false;
-    const { data, error } = await sb.rpc("is_admin");
-    isAdmin = !error && data === true;
+    // Remembered per user, so the owner still gets the owner's view offline.
+    let data, error;
+    try { ({ data, error } = await sb.rpc("is_admin")); } catch (e) { error = e; }
+    isAdmin = error ? lsGet("team.admin." + me.id, false) === true : data === true;
+    if (!error) lsSet("team.admin." + me.id, isAdmin);
     curPerson = isAdmin ? lsGet("team.person", null) : me.email;
     $("people-group").hidden = !isAdmin;
     $("paste").hidden = !isAdmin;
@@ -822,13 +1080,38 @@
     $("app").hidden = false;
     setStatus("Loading your tasks…");
     await loadRows();
+    flushQueue();
     // Live: changes to tasks you can see show up here (the database filters what you receive).
     channel = sb.channel("team_tasks")
       .on("postgres_changes", { event: "*", schema: "public", table: "team_tasks" }, reloadSoon)
       .subscribe();
     runPendingPublish();
   }
-  document.addEventListener("visibilitychange", () => { if (!document.hidden && me) reloadSoon(); });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && me) { flushQueue(); reloadSoon(); } });
+
+  // ---- Pull to refresh, only in the home-screen app (the browser has its own) ----
+  (() => {
+    const ptr = $("ptr");
+    let y0 = null, pull = 0;
+    const show = (v) => { pull = v; ptr.style.setProperty("--pull", Math.min(v, 110) + "px"); ptr.classList.toggle("on", v > 8); };
+    addEventListener("touchstart", (e) => {
+      y0 = me && standalone() && scrollY <= 0 && !document.body.classList.contains("sheet-open") && !e.target.closest(".side, .add-form, .account")
+        ? e.touches[0].clientY : null;
+    }, { passive: true });
+    addEventListener("touchmove", (e) => { if (y0 !== null) show(Math.max(0, (e.touches[0].clientY - y0) * 0.6)); }, { passive: true });
+    addEventListener("touchend", async () => {
+      if (y0 === null) return;
+      y0 = null;
+      if (pull < 70) { show(0); return; }
+      ptr.classList.add("spin");
+      buzz();
+      setStatus("Refreshing…");
+      await flushQueue();
+      await loadRows();
+      ptr.classList.remove("spin");
+      show(0);
+    });
+  })();
   // A publish link opened while the app is already open in this tab only changes the #part.
   window.addEventListener("hashchange", () => {
     if (!/[#&]publish=/.test(location.hash)) return;
@@ -855,6 +1138,7 @@
       $("demo-hint").textContent = `Demo mode: everything stays in this browser. Use any email and the code ${d.code}. Sign in as ${d.owner} to be the owner. Each tab can be a different person.`;
       $("demo-hint").hidden = false;
     }
+    if (window.TEAM_CLIENT && window.TEAM_CLIENT.demo) codeLen = String(window.TEAM_CLIENT.demo.code).length;
     if (window.TEAM_CLIENT) sb = window.TEAM_CLIENT;   // demo mode and local tests
     else if (SUPABASE_URL.startsWith("YOUR_") || !window.supabase) {
       setStatus(window.supabase ? "This app isn't connected to its database yet. Add the Supabase URL and key at the top of the script." : "Couldn't load the sign-in library. Check your connection and reload.", "err");
@@ -864,6 +1148,10 @@
     sb.auth.getSession().then(({ data }) => onSession(data.session));
   }
   start();
+  // Offline: sw.js keeps the app's files so it opens without a connection (tasks come from the cache above).
+  if ("serviceWorker" in navigator && (location.protocol === "https:" || location.hostname === "localhost")) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
 })();
 </script>
 </body>

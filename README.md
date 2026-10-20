@@ -5,6 +5,7 @@ A hosted companion to ProTracker. You push the tasks you assigned someone in Pro
 - `index.html`: the whole app, a static page that runs on any static host.
 - `schema.sql`: the database tables and privacy rules for Supabase.
 - `demo-client.js`: an in-browser stand-in for Supabase, used only by demo mode (`?demo`).
+- `sw.js`: lets the app open offline.
 - `deploy.sh`: publishes this folder to GitHub Pages (live at https://team.indexhomes.in/).
 - `CNAME`: the custom domain GitHub Pages serves the app on.
 - `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`, `favicon.png` (the Index Homes gold "1" logo on dark navy); `logo.png` is the same logo, trimmed and transparent, shown beside the title: let phones install it with **Add to Home screen** as a full-screen app with its own icon (no browser address bar).
@@ -33,6 +34,15 @@ Demo data lives only in this browser. Sign-in emails and privacy are only real o
 8. **Point ProTracker at it.** In ProTracker's `tasks.html`, set `TEAM_URL` to the hosted address and republish the artifact.
 
 Supabase's built-in email sender only sends a few emails per hour, which is fine for a handful of people. For more, add your own SMTP under Authentication → SMTP Settings.
+
+## On phones
+
+- Add it to the home screen (Chrome: ⋮ → Install app; Safari: Share → Add to Home Screen) and it opens full screen like an app.
+- Sign in with the code from the email. In the home-screen app, don't tap the email's link: it signs in the browser, not the app.
+- Tap the list's title (e.g. "My tasks ⌄") to pick a tag (or, for the owner, a person) from a sheet at the bottom.
+- Swipe a task right to tick it, left to delete one you added. Every tick or delete can be undone from the bar that appears.
+- Pull down to refresh in the home-screen app.
+- Works offline: it opens with your last list, and ticks and new tasks are sent when you're back online.
 
 ## Publishing
 
