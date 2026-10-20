@@ -7,7 +7,7 @@ A hosted companion to ProTracker. You push the tasks you assigned someone in Pro
 - `demo-client.js`: an in-browser stand-in for Supabase, used only by demo mode (`?demo`).
 - `deploy.sh`: publishes this folder to GitHub Pages (live at https://team.indexhomes.in/).
 - `CNAME`: the custom domain GitHub Pages serves the app on.
-- `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`, `favicon.png` (the Index Homes gold "1" logo on dark navy): let phones install it with **Add to Home screen** as a full-screen app with its own icon (no browser address bar).
+- `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`, `favicon.png` (the Index Homes gold "1" logo on dark navy); `logo.png` is the same logo, trimmed and transparent, shown beside the title: let phones install it with **Add to Home screen** as a full-screen app with its own icon (no browser address bar).
 
 ## Try it locally (demo mode)
 
