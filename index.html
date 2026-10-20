@@ -100,6 +100,14 @@
   }
   .account-menu .hint { overflow-wrap: anywhere; }
   .quiet-btn { background: var(--paper); color: var(--ink); border: 1px solid var(--line); }
+  .push-card {
+    display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; align-items: center;
+    background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--sheet)); border-radius: var(--radius); padding: 14px 16px;
+  }
+  .push-card svg { width: 24px; height: 24px; color: var(--accent); }
+  .push-card p { margin: 0; font-size: 0.95rem; }
+  .push-card .row { grid-column: 2; }
+  .push-card .btn { min-height: 44px; }
 
   .btn {
     font: inherit; font-weight: 700; border: 0; border-radius: 10px; cursor: pointer;
@@ -299,6 +307,8 @@
       <summary aria-label="Account"><span class="av" id="who-av" aria-hidden="true"></span><span class="who-email" id="who-email"></span></summary>
       <div class="account-menu">
         <p class="hint" id="who-full"></p>
+        <button class="btn quiet-btn" id="push-toggle" type="button" hidden>Turn on notifications</button>
+        <p class="hint" id="push-note" hidden></p>
         <button class="btn quiet-btn" id="sign-out" type="button">Sign out</button>
       </div>
     </details>
@@ -356,6 +366,14 @@
         <h2><button class="picker" id="picker" type="button" aria-controls="side" aria-expanded="false"><span id="list-title">My tasks</span><svg class="chev" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6l4 4 4-4"/></svg></button></h2>
         <div class="head-right">
           <span class="sub" id="list-sub"></span>
+        </div>
+      </div>
+      <div class="push-card" id="push-card" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+        <p id="push-card-text">Get a notification on this phone when new tasks are shared with you.</p>
+        <div class="row">
+          <button class="btn btn-primary" id="push-on" type="button">Turn on</button>
+          <button class="linkish" id="push-later" type="button">Not now</button>
         </div>
       </div>
       <div class="progress" id="progress" role="progressbar" aria-label="Tasks done" aria-valuemin="0" aria-valuemax="100" hidden><div class="progress-fill" id="progress-fill"></div></div>
@@ -549,15 +567,29 @@
       const { error } = await sb.from("team_tasks").delete().in("id", remove);
       if (error) throw error;
     }
+    // New tasks: a notification on each phone where they turned notifications on (a failure doesn't stop the publish).
+    let notified = 0;
+    if (add.length && sb.functions) {
+      const titles = add.slice(0, 3).map(r => r.title.length > 60 ? r.title.slice(0, 58) + "…" : r.title);
+      try {
+        const { data } = await sb.functions.invoke("push", { body: {
+          action: "notify", email,
+          title: add.length === 1 ? "New task from ProTracker" : `${add.length} new tasks from ProTracker`,
+          body: titles.join(" · ") + (add.length > 3 ? ` +${add.length - 3} more` : ""),
+        } });
+        notified = (data && data.sent) || 0;
+      } catch {}
+    }
     const parts = [`${incoming.length} ${incoming.length === 1 ? "task" : "tasks"}`];
     if (add.length) parts.push(`${add.length} new`);
+    if (notified) parts.push(`notified on ${notified} ${notified === 1 ? "device" : "devices"}`);
     if (renamed) parts.push(`${renamed} renamed`);
     if (retagged) parts.push(`${retagged} with new tags`);
     if (remove.length) parts.push(`${remove.length} removed`);
     return { email, name, label: name || email, parts };
   }
 
-  $("blocked-switch").addEventListener("click", async () => { $("blocked").hidden = true; await sb.auth.signOut(); });
+  $("blocked-switch").addEventListener("click", async () => { $("blocked").hidden = true; await forgetDevice(false); await sb.auth.signOut(); });
   $("blocked-dismiss").addEventListener("click", () => { ssSet("team.publish", null); $("blocked").hidden = true; });
   $("paste-form").addEventListener("submit", (e) => {
     e.preventDefault();
@@ -994,6 +1026,86 @@
     }
   }
 
+  // ---- Notifications: a member's phone is told when new tasks are pushed to them ----
+  // The phone subscribes with the push function's public key; the subscription is saved in push_subscriptions
+  // (one row per device, removed on sign-out). Publishing calls the function, which sends to that person's devices.
+  // On iPhone this only works in the app added to the Home Screen (iOS 16.4+), not in Safari itself.
+  const appleMobile = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+  const canPush = () => !!(sb && sb.functions) && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  async function pushKey() {
+    const saved = lsGet("team.pushKey", null);
+    if (saved) return saved;
+    const { data, error } = await sb.functions.invoke("push", { body: { action: "key" } });
+    if (error || !data || !data.publicKey) throw error || new Error("no key");
+    lsSet("team.pushKey", data.publicKey);
+    return data.publicKey;
+  }
+  async function deviceSub() {
+    try { const reg = await navigator.serviceWorker.getRegistration(); return reg ? await reg.pushManager.getSubscription() : null; }
+    catch { return null; }
+  }
+  async function saveSub(sub) {
+    const j = sub.toJSON();
+    const { error } = await sb.from("push_subscriptions").upsert(
+      { endpoint: j.endpoint, email: me.email, user_id: me.id, p256dh: j.keys.p256dh, auth: j.keys.auth }, { onConflict: "endpoint" });
+    if (error) throw error;
+  }
+  // "none" (owner, demo, or no support), "ios" (iPhone Safari: add to Home Screen first), "blocked", "on", "off"
+  async function pushState() {
+    if (!me || isAdmin || !(sb && sb.functions)) return "none";
+    if (appleMobile() && !standalone() && !("PushManager" in window)) return "ios";
+    if (!canPush()) return "none";
+    if (Notification.permission === "denied") return "blocked";
+    return Notification.permission === "granted" && await deviceSub() ? "on" : "off";
+  }
+  async function renderPush() {
+    const st = await pushState();
+    const later = lsGet("team.pushLater", false);
+    $("push-card").hidden = !((st === "off" || st === "ios") && !later);
+    $("push-card-text").textContent = st === "ios"
+      ? "To get a notification when new tasks are shared with you, add this app to your Home Screen (Share → Add to Home Screen) and open it from there."
+      : "Get a notification on this phone when new tasks are shared with you.";
+    $("push-on").hidden = st === "ios";
+    $("push-toggle").hidden = !(st === "on" || st === "off");
+    $("push-toggle").textContent = st === "on" ? "Turn off notifications" : "Turn on notifications";
+    $("push-note").hidden = !(st === "blocked" || st === "ios");
+    $("push-note").textContent = st === "blocked" ? "Notifications are blocked for this app. Allow them in your phone's settings."
+      : "For notifications, add this app to your Home Screen.";
+  }
+  async function turnOnPush() {
+    $("push-on").disabled = $("push-toggle").disabled = true;
+    try {
+      if (await Notification.requestPermission() !== "granted") {
+        setStatus("Notifications weren't allowed. You can allow them later in your phone's settings for this app.", "err");
+        return;
+      }
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription()
+        || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: fromB64url(await pushKey()) });
+      await saveSub(sub);
+      setStatus("Notifications are on. You'll get one when new tasks are shared with you.", "ok");
+    } catch (e) {
+      setStatus("Couldn't turn on notifications: " + ((e && e.message) || e), "err");
+    } finally {
+      $("push-on").disabled = $("push-toggle").disabled = false;
+      renderPush();
+    }
+  }
+  // Forgets this device on the server (before sign-out too, so the next person on it isn't sent someone else's tasks).
+  async function forgetDevice(unsubscribe) {
+    const sub = await deviceSub();
+    if (!sub || !me) return;
+    try { await sb.from("push_subscriptions").delete().eq("endpoint", sub.endpoint); } catch {}
+    if (unsubscribe) await sub.unsubscribe().catch(() => {});
+  }
+  $("push-on").addEventListener("click", turnOnPush);
+  $("push-later").addEventListener("click", () => { lsSet("team.pushLater", true); renderPush(); });
+  $("push-toggle").addEventListener("click", async () => {
+    $("who").open = false;
+    if ((await pushState()) === "on") { await forgetDevice(true); setStatus("Notifications are off on this device."); renderPush(); }
+    else turnOnPush();
+  });
+
   // ---- Sign in: a one-time code by email (the link in the same email works too) ----
   let codeEmail = "";
   $("email-form").addEventListener("submit", async (e) => {
@@ -1038,7 +1150,7 @@
     $("code").value = "";
     showError("signin-error", "");
   });
-  $("sign-out").addEventListener("click", async () => { $("who").open = false; await sb.auth.signOut(); });
+  $("sign-out").addEventListener("click", async () => { $("who").open = false; await forgetDevice(false); await sb.auth.signOut(); });
   document.addEventListener("click", (e) => { if ($("who").open && !$("who").contains(e.target)) $("who").open = false; });
 
   let channel = null;
@@ -1048,6 +1160,7 @@
       if (channel) { sb.removeChannel(channel); channel = null; }
       $("who").hidden = true;
       $("who").open = false;
+      $("push-card").hidden = true;
       document.body.classList.remove("has-add");
       closeSheet();
       hideToast();
@@ -1081,6 +1194,8 @@
     setStatus("Loading your tasks…");
     await loadRows();
     flushQueue();
+    renderPush();
+    if ((await pushState()) === "on") deviceSub().then(sub => sub && saveSub(sub)).catch(() => {});
     // Live: changes to tasks you can see show up here (the database filters what you receive).
     channel = sb.channel("team_tasks")
       .on("postgres_changes", { event: "*", schema: "public", table: "team_tasks" }, reloadSoon)

@@ -5,7 +5,8 @@ A hosted companion to ProTracker. You push the tasks you assigned someone in Pro
 - `index.html`: the whole app, a static page that runs on any static host.
 - `schema.sql`: the database tables and privacy rules for Supabase.
 - `demo-client.js`: an in-browser stand-in for Supabase, used only by demo mode (`?demo`).
-- `sw.js`: lets the app open offline.
+- `sw.js`: lets the app open offline and shows notifications.
+- `functions/push/index.ts`: the Supabase Edge Function that sends notifications (deploy it as `push` with JWT verification on; it makes its own signing keys).
 - `deploy.sh`: publishes this folder to GitHub Pages (live at https://team.indexhomes.in/).
 - `CNAME`: the custom domain GitHub Pages serves the app on.
 - `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`, `favicon.png` (the Index Homes gold "1" logo on dark navy); `logo.png` is the same logo, trimmed and transparent, shown beside the title: let phones install it with **Add to Home screen** as a full-screen app with its own icon (no browser address bar).
@@ -31,7 +32,8 @@ Demo data lives only in this browser. Sign-in emails and privacy are only real o
    insert into public.admins (user_id) select id from auth.users where email = 'you@example.com';
    ```
    Reload the app, and you'll see the People list and the owner tools.
-8. **Point ProTracker at it.** In ProTracker's `tasks.html`, set `TEAM_URL` to the hosted address and republish the artifact.
+8. **Notifications (optional).** Deploy `functions/push/index.ts` as the Edge Function `push` (Supabase dashboard → Edge Functions, or the CLI: `supabase functions deploy push`). Nothing else to configure: it creates its key pair on first use.
+9. **Point ProTracker at it.** In ProTracker's `tasks.html`, set `TEAM_URL` to the hosted address and republish the artifact.
 
 Supabase's built-in email sender only sends a few emails per hour, which is fine for a handful of people. For more, add your own SMTP under Authentication → SMTP Settings.
 
@@ -42,6 +44,7 @@ Supabase's built-in email sender only sends a few emails per hour, which is fine
 - Tap the list's title (e.g. "My tasks ⌄") to pick a tag (or, for the owner, a person) from a sheet at the bottom.
 - Swipe a task right to tick it, left to delete one you added. Every tick or delete can be undone from the bar that appears.
 - Pull down to refresh in the home-screen app.
+- Notifications: tap **Turn on** on the card above the list (or in the menu under your initial) to get a notification when new tasks are shared with you. On iPhone this needs iOS 16.4+ and the app added to the Home Screen; in Safari itself it isn't possible.
 - Works offline: it opens with your last list, and ticks and new tasks are sent when you're back online.
 
 ## Publishing
@@ -54,6 +57,7 @@ Supabase's built-in email sender only sends a few emails per hour, which is fine
 What a push does, for each person in it:
 - Their list becomes exactly the tasks assigned to them in ProTracker (Repo excluded), in ProTracker's order, with subtasks right after their parent.
 - New tasks are added; existing ones take any new name and tags. Ticks they made are kept.
+- If they got new tasks and turned notifications on, each of their phones gets a notification ("3 new tasks from ProTracker" with the first titles). The status line says how many devices were notified.
 - Tags show as coloured chips on each task, and a Tags column on the left (like ProTracker's Tree view) shows one tag's tasks at a time.
 - Tasks no longer assigned to them are removed.
 - Tasks they added themselves are never changed or removed by a push.

@@ -158,3 +158,39 @@ as $$
     )
 $$;
 grant execute on function public.team_progress(text) to anon, authenticated;
+
+-- ---- Notifications (web push) ----
+-- Phones and browsers that asked for notifications. One row per device (endpoint), tied to whoever signed in on it.
+-- The Edge Function "push" (team/functions/push/index.ts) reads these with the service role to send.
+create table if not exists public.push_subscriptions (
+  endpoint text primary key check (endpoint like 'https://%'),
+  email text not null check (email = lower(email)),
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  p256dh text not null,
+  auth text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists push_subscriptions_email on public.push_subscriptions (email);
+alter table public.push_subscriptions enable row level security;
+
+drop policy if exists "own devices: read" on public.push_subscriptions;
+create policy "own devices: read" on public.push_subscriptions for select to authenticated
+using (user_id = auth.uid());
+drop policy if exists "own devices: add" on public.push_subscriptions;
+create policy "own devices: add" on public.push_subscriptions for insert to authenticated
+with check (user_id = auth.uid() and email = public.my_email());
+drop policy if exists "own devices: change" on public.push_subscriptions;
+create policy "own devices: change" on public.push_subscriptions for update to authenticated
+using (user_id = auth.uid()) with check (user_id = auth.uid() and email = public.my_email());
+drop policy if exists "own devices: remove" on public.push_subscriptions;
+create policy "own devices: remove" on public.push_subscriptions for delete to authenticated
+using (user_id = auth.uid());
+
+-- The key pair that signs notifications. Created by the push function on first use; only the server reads it.
+create table if not exists public.push_config (
+  id int primary key default 1 check (id = 1),
+  public_key text not null,
+  private_key text not null
+);
+alter table public.push_config enable row level security;
+-- No policies on purpose: the app can't read this table, only the push function (service role).
