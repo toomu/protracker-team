@@ -1,196 +1,53 @@
--- ProTracker Team: database setup for Supabase.
--- Run this once in the Supabase dashboard: SQL Editor -> New query -> paste -> Run.
--- It is safe to run again; it only creates what's missing.
-
--- Who may publish and see everyone's tasks. Add yourself after your first sign-in:
---   insert into public.admins (user_id) select id from auth.users where email = 'you@example.com';
-create table if not exists public.admins (
-  user_id uuid primary key references auth.users (id) on delete cascade
-);
-alter table public.admins enable row level security;
--- No policies on purpose: nobody can read or change this table from the app.
-
--- One row per task. A person's tasks form a tree through parent_id.
--- Tasks published from ProTracker carry source_id (the ProTracker task id);
--- tasks people add themselves have source_id null.
-create table if not exists public.team_tasks (
-  id uuid primary key default gen_random_uuid(),
-  assignee_email text not null check (assignee_email = lower(assignee_email) and assignee_email like '%_@_%'),
-  source_id text,
-  title text not null check (char_length(title) between 1 and 300),
-  done boolean not null default false,
-  completed_at timestamptz,
-  parent_id uuid references public.team_tasks (id) on delete set null,
-  sort double precision not null default 0,
-  created_by uuid default auth.uid() references auth.users (id) on delete set null,
-  created_at timestamptz not null default now(),
+-- ProTracker (hosted at protracker.indexhomes.in): where each person's ProTracker data lives in Supabase.
+-- Same shape as the claude.ai artifact's per-user collection: one row per document. Task documents use the
+-- task id; the people list, saved tags, tag categories and team ticks are the documents _people, _tags,
+-- _tagcats and _team. Run once in the SQL Editor (safe to run again). Needs team/schema.sql first.
+create table if not exists public.pt_docs (
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  id text not null check (char_length(id) between 1 and 200),
+  data jsonb not null,
   updated_at timestamptz not null default now(),
-  unique (assignee_email, source_id)
+  primary key (user_id, id)
 );
--- Tags from ProTracker (lowercase words, no #). Added after the first version, hence the separate statement.
-alter table public.team_tasks add column if not exists tags text[] not null default '{}';
-create index if not exists team_tasks_assignee on public.team_tasks (assignee_email);
-create index if not exists team_tasks_parent on public.team_tasks (parent_id);
+alter table public.pt_docs enable row level security;
 
-create or replace function public.is_admin() returns boolean
-language sql stable security definer set search_path = ''
-as $$ select exists (select 1 from public.admins where user_id = auth.uid()) $$;
+-- Each person reads and writes only their own documents.
+drop policy if exists "own docs: read" on public.pt_docs;
+create policy "own docs: read" on public.pt_docs for select to authenticated using (user_id = (select auth.uid()));
+drop policy if exists "own docs: add" on public.pt_docs;
+create policy "own docs: add" on public.pt_docs for insert to authenticated with check (user_id = (select auth.uid()));
+drop policy if exists "own docs: change" on public.pt_docs;
+create policy "own docs: change" on public.pt_docs for update to authenticated
+using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+drop policy if exists "own docs: remove" on public.pt_docs;
+create policy "own docs: remove" on public.pt_docs for delete to authenticated using (user_id = (select auth.uid()));
 
-create or replace function public.my_email() returns text
-language sql stable set search_path = ''
-as $$ select lower(coalesce(auth.jwt() ->> 'email', '')) $$;
-
--- Keeps updated_at current, and keeps a task's parent inside the same person's tree.
--- security definer so the parent lookup sees every row, not only the ones this person may read.
-create or replace function public.team_tasks_guard() returns trigger
-language plpgsql security definer set search_path = ''
-as $$
-declare parent_email text;
-begin
-  new.updated_at := now();
-  if new.parent_id is not null then
-    if new.parent_id = new.id then
-      raise exception 'a task cannot be its own parent';
-    end if;
-    select assignee_email into parent_email from public.team_tasks where id = new.parent_id;
-    -- A parent inserted in the same statement isn't visible yet; the foreign key still checks it exists.
-    if parent_email is not null and parent_email <> new.assignee_email then
-      raise exception 'a task can only be nested under a task of the same person';
-    end if;
-  end if;
-  return new;
-end $$;
-
-drop trigger if exists team_tasks_guard on public.team_tasks;
-create trigger team_tasks_guard before insert or update on public.team_tasks
-for each row execute function public.team_tasks_guard();
-
-alter table public.team_tasks enable row level security;
-
--- Everyone sees only their own tasks; admins see all.
-drop policy if exists "read own or admin" on public.team_tasks;
-create policy "read own or admin" on public.team_tasks for select to authenticated
-using (public.is_admin() or assignee_email = public.my_email());
-
--- People add tasks to their own tree only; admins publish to anyone.
-drop policy if exists "add own or admin" on public.team_tasks;
-create policy "add own or admin" on public.team_tasks for insert to authenticated
-with check (
-  public.is_admin()
-  or (assignee_email = public.my_email() and source_id is null and created_by = auth.uid())
-);
-
--- People change their own tasks (tick, rename, arrange) but can't hand them to someone else.
-drop policy if exists "change own or admin" on public.team_tasks;
-create policy "change own or admin" on public.team_tasks for update to authenticated
-using (public.is_admin() or assignee_email = public.my_email())
-with check (public.is_admin() or assignee_email = public.my_email());
-
--- People delete only tasks they added themselves; published tasks are removed by publishing.
-drop policy if exists "delete own added or admin" on public.team_tasks;
-create policy "delete own added or admin" on public.team_tasks for delete to authenticated
-using (public.is_admin() or (assignee_email = public.my_email() and source_id is null and created_by = auth.uid()));
-
--- People can't rewrite which ProTracker task a row came from.
-create or replace function public.team_tasks_lock_source() returns trigger
-language plpgsql set search_path = ''
-as $$
-begin
-  if not public.is_admin() and new.source_id is distinct from old.source_id then
-    raise exception 'source_id can only be changed by publishing';
-  end if;
-  return new;
-end $$;
-
-drop trigger if exists team_tasks_lock_source on public.team_tasks;
-create trigger team_tasks_lock_source before update on public.team_tasks
-for each row execute function public.team_tasks_lock_source();
-
--- Live updates in the app (rows are still filtered by the policies above).
+-- Live updates between devices (rows still filtered by the policies above).
 do $$
 begin
   if not exists (
     select 1 from pg_publication_tables
-    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'team_tasks'
+    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'pt_docs'
   ) then
-    alter publication supabase_realtime add table public.team_tasks;
+    alter publication supabase_realtime add table public.pt_docs;
   end if;
 end $$;
 
--- ---- Sync key: lets ProTracker read team members' ticks without signing in ----
--- The owner creates a key in the team app (Connect ProTracker) and pastes it into ProTracker once.
--- Only a hash of the key is stored. A new key replaces the old one.
-create table if not exists public.sync_keys (
-  key_hash text primary key,
-  owner_id uuid not null references auth.users (id) on delete cascade,
-  created_at timestamptz not null default now()
+-- Which ProTracker each team member gets: "simple" (one list: what the owner assigned them plus their own
+-- tasks) or "full" (all of ProTracker plus an Assigned tab). No row means simple. Only the owner (public.admins)
+-- sets it, from the People view; each member can read only their own row.
+create table if not exists public.pt_members (
+  email text primary key check (email = lower(email) and email like '%_@_%'),
+  mode text not null default 'simple' check (mode in ('simple', 'full')),
+  updated_at timestamptz not null default now()
 );
-alter table public.sync_keys enable row level security;
--- No policies on purpose: only the functions below touch this table.
-
-create or replace function public.create_sync_key() returns text
-language plpgsql security definer set search_path = ''
-as $$
-declare k text;
-begin
-  if not public.is_admin() then
-    raise exception 'only the owner can create a sync key';
-  end if;
-  k := replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', '');
-  delete from public.sync_keys where owner_id = auth.uid();
-  insert into public.sync_keys (key_hash, owner_id) values (encode(sha256(convert_to(k, 'UTF8')), 'hex'), auth.uid());
-  return k;
-end $$;
-revoke all on function public.create_sync_key() from public, anon;
-grant execute on function public.create_sync_key() to authenticated;
-
--- With a valid key: which published tasks are ticked, and by whom. Nothing else.
-create or replace function public.team_progress(sync_key text)
-returns table (source_id text, assignee_email text, done boolean, completed_at timestamptz)
-language sql stable security definer set search_path = ''
-as $$
-  select t.source_id, t.assignee_email, t.done, t.completed_at
-  from public.team_tasks t
-  where t.source_id is not null
-    and exists (
-      select 1 from public.sync_keys k
-      where k.key_hash = encode(sha256(convert_to(coalesce(sync_key, ''), 'UTF8')), 'hex')
-    )
-$$;
-grant execute on function public.team_progress(text) to anon, authenticated;
-
--- ---- Notifications (web push) ----
--- Phones and browsers that asked for notifications. One row per device (endpoint), tied to whoever signed in on it.
--- The Edge Function "push" (team/functions/push/index.ts) reads these with the service role to send.
-create table if not exists public.push_subscriptions (
-  endpoint text primary key check (endpoint like 'https://%'),
-  email text not null check (email = lower(email)),
-  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
-  p256dh text not null,
-  auth text not null,
-  created_at timestamptz not null default now()
-);
-create index if not exists push_subscriptions_email on public.push_subscriptions (email);
-alter table public.push_subscriptions enable row level security;
-
-drop policy if exists "own devices: read" on public.push_subscriptions;
-create policy "own devices: read" on public.push_subscriptions for select to authenticated
-using (user_id = auth.uid());
-drop policy if exists "own devices: add" on public.push_subscriptions;
-create policy "own devices: add" on public.push_subscriptions for insert to authenticated
-with check (user_id = auth.uid() and email = public.my_email());
-drop policy if exists "own devices: change" on public.push_subscriptions;
-create policy "own devices: change" on public.push_subscriptions for update to authenticated
-using (user_id = auth.uid()) with check (user_id = auth.uid() and email = public.my_email());
-drop policy if exists "own devices: remove" on public.push_subscriptions;
-create policy "own devices: remove" on public.push_subscriptions for delete to authenticated
-using (user_id = auth.uid());
-
--- The key pair that signs notifications. Created by the push function on first use; only the server reads it.
-create table if not exists public.push_config (
-  id int primary key default 1 check (id = 1),
-  public_key text not null,
-  private_key text not null
-);
-alter table public.push_config enable row level security;
--- No policies on purpose: the app can't read this table, only the push function (service role).
+alter table public.pt_members enable row level security;
+drop policy if exists "members: read own or owner" on public.pt_members;
+create policy "members: read own or owner" on public.pt_members for select to authenticated
+using (email = public.my_email() or public.is_admin());
+drop policy if exists "members: owner adds" on public.pt_members;
+create policy "members: owner adds" on public.pt_members for insert to authenticated with check (public.is_admin());
+drop policy if exists "members: owner changes" on public.pt_members;
+create policy "members: owner changes" on public.pt_members for update to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "members: owner removes" on public.pt_members;
+create policy "members: owner removes" on public.pt_members for delete to authenticated using (public.is_admin());

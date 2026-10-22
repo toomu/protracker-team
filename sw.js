@@ -1,8 +1,9 @@
-// Lets the team app open without a connection. The app's own files are fetched fresh when online
-// (so updates arrive at once) and kept as a fallback; the sign-in library and fonts are kept after
-// their first load. Database and sign-in requests (supabase.co) are never touched.
-const CACHE = "team-v2";
-const SHELL = ["./", "manifest.webmanifest", "logo.png", "icon-192.png", "favicon.png",
+// Lets ProTracker open without a connection, and shows notifications. The app's own files are fetched fresh when
+// online (so updates arrive at once) and kept as a fallback; the sign-in library and fonts are kept after their
+// first load. Database, sign-in and handwriting requests (supabase.co) are never touched. At team.indexhomes.in
+// this replaces the old team app's sw.js at the same address, so phones that turned notifications on keep them.
+const CACHE = "protracker-v2";
+const SHELL = ["./", "manifest.webmanifest", "icon-192.png",
   "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"];
 
 self.addEventListener("install", (e) => {
@@ -17,7 +18,7 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET") return;
   const url = new URL(req.url);
   if (url.origin === location.origin) {
-    // Network first; the saved copy when offline. Every page address (?demo, #publish=…) falls back to the app.
+    // Network first; the saved copy when offline. Every page address falls back to the app.
     e.respondWith(fetch(req).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(CACHE).then(c => c.put(req.mode === "navigate" ? "./" : req, copy)); }
       return res;
@@ -33,11 +34,11 @@ self.addEventListener("fetch", (e) => {
   }
 });
 
-// Notifications sent by the push function when new tasks are published to this person.
+// Notifications sent by the push function when the owner assigns someone new tasks.
 self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data ? e.data.text() : "" }; }
-  e.waitUntil(self.registration.showNotification(d.title || "ProTracker Team", {
+  e.waitUntil(self.registration.showNotification(d.title || "ProTracker", {
     body: d.body || "", icon: "icon-192.png", data: { url: "./" },
   }));
 });
