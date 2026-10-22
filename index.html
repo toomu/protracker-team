@@ -3944,7 +3944,21 @@
     if (window.supabase && typeof window.supabase.createClient === "function") return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     return null;
   }
+  // protracker.indexhomes.in forwards to team.indexhomes.in, the one address for everyone. Changes made on this
+  // device while offline and not yet saved are sent first, so nothing is stranded at the old address.
+  const MOVED_TO = location.hostname === "protracker.indexhomes.in" ? "https://team.indexhomes.in/" : "";
+  const pendingHere = (uid) => { try { return Object.keys(JSON.parse(localStorage.getItem("protracker.pending." + uid) || "{}")).length; } catch { return 0; } };
   async function startHosted() {
+    if (MOVED_TO) {
+      const { data } = await sb.auth.getSession();
+      const session = data && data.session;
+      if (!session || !pendingHere(session.user.id)) { location.replace(MOVED_TO); return; }
+      notice("ProTracker has moved to team.indexhomes.in. Saving your offline changes first…");
+      (function wait() {
+        if (store && store.ready && store.ready() && !store.pendingCount()) location.replace(MOVED_TO);
+        else setTimeout(wait, 1000);
+      })();
+    }
     sb.auth.onAuthStateChange((event, session) => {
       if (session && !me) setTimeout(() => signedIn(session), 0);
       if (event === "SIGNED_OUT" && me) location.reload();

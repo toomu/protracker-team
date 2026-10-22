@@ -1,6 +1,6 @@
 # ProTracker (hosted)
 
-ProTracker as its own web app at **https://protracker.indexhomes.in/**, with sign-in by email and your tasks saved in Supabase. It's the same page as the claude.ai artifact (`tasks.html`), built for hosting by `build.py`.
+ProTracker as its own web app at **https://team.indexhomes.in/** (https://protracker.indexhomes.in/ forwards there, after saving any offline changes left on that device), with sign-in by email and your tasks saved in Supabase. It's the same page as the claude.ai artifact (`tasks.html`), built for hosting by `build.py`.
 
 - `build.py`: wraps `../tasks.html` into `index.html`. It adds the install tags, supabase-js and the service worker at the `<!--hosted-head…-->` marker, and copies the files below.
 - `deploy.sh "What changed"`: builds it into both public repos and pushes: `toomu/protracker-app` (protracker.indexhomes.in) and `toomu/protracker-team` (team.indexhomes.in, the old team app's address). GitHub Pages serves them.
