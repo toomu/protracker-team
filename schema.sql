@@ -110,3 +110,28 @@ using (
   or (assignee_email = public.my_email() and source_id is null and created_by = (select auth.uid()))
   or (created_by = (select auth.uid()) and source_id is not null and public.can_assign())
 );
+
+-- ---- Security clean-up (Oct 23 2026) ----
+-- The old claude.ai sync key (team.indexhomes.in "Connect ProTracker", replaced by the Supabase connector) is gone.
+drop function if exists public.team_progress(text);
+drop function if exists public.create_sync_key();
+drop table if exists public.sync_keys;
+-- Who created and who assigned a task never change after it's made (an assignee can't take a task over).
+create or replace function public.team_tasks_assigner() returns trigger
+language plpgsql set search_path = ''
+as $$
+begin
+  if tg_op = 'INSERT' then
+    new.assigned_by := case when new.source_id is null then null else public.my_email() end;
+  else
+    new.assigned_by := old.assigned_by;
+    new.created_by := old.created_by;
+  end if;
+  return new;
+end $$;
+-- Nothing callable without signing in except what the access rules need; trigger functions not callable at all.
+revoke execute on function public.is_admin() from public, anon;
+grant execute on function public.is_admin() to authenticated;
+revoke execute on function public.team_tasks_guard() from public, anon, authenticated;
+revoke execute on function public.team_tasks_lock_source() from public, anon, authenticated;
+revoke execute on function public.team_tasks_assigner() from public, anon, authenticated;
