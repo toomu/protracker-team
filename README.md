@@ -12,7 +12,7 @@ ProTracker as its own web app at **https://team.indexhomes.in/** (https://protra
 
 ## How it works
 
-- **Sign in:** you type your email, then the 8-digit code from the email (the same Supabase sign-in as the team app). Anyone can sign in, and each person gets their own private ProTracker.
+- **Sign in:** you type your email, then the 8-digit code from the email. Only the owner and the emails in the owner's People list can sign in: the sign-in hook `pt_access_token_hook` refuses everyone else, and the access rules block them as a backstop (see `schema.sql`). Each person gets their own private ProTracker.
 - **Storage:**
   - One row per document in `pt_docs`, the same shape as the artifact's: task documents keyed by task id, plus `_people`, `_tags`, `_tagcats` and `_team`.
   - Changes show at once and save in the background. Offline, they wait on the device and are sent when you're back.
@@ -31,3 +31,4 @@ ProTracker as its own web app at **https://team.indexhomes.in/** (https://protra
 2. Go to Authentication → URL Configuration and add `https://protracker.indexhomes.in` under Redirect URLs, so the link in the sign-in email comes back here (the code works without it).
 3. In DNS (GoDaddy), add a CNAME record: `protracker` → `toomu.github.io`.
 4. In the repo's Pages settings, once the certificate is issued, turn on Enforce HTTPS.
+5. Turn on the sign-in hook: Authentication → Hooks → Customize Access Token (JWT) Claims → Postgres → schema `public`, function `pt_access_token_hook`.

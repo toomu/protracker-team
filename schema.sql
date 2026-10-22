@@ -135,3 +135,50 @@ grant execute on function public.is_admin() to authenticated;
 revoke execute on function public.team_tasks_guard() from public, anon, authenticated;
 revoke execute on function public.team_tasks_lock_source() from public, anon, authenticated;
 revoke execute on function public.team_tasks_assigner() from public, anon, authenticated;
+
+-- ---- Sign-in only for people the owner added (Oct 23 2026) ----
+-- Allowed: the owner(s), and every email in an owner's People list (their _people document).
+create or replace function public.pt_is_allowed(p_email text) returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select coalesce(p_email, '') <> '' and (
+    exists (select 1 from public.admins a join auth.users u on u.id = a.user_id where lower(u.email) = lower(p_email))
+    or exists (
+      select 1 from public.pt_docs d join public.admins a on a.user_id = d.user_id,
+        jsonb_array_elements(case when jsonb_typeof(d.data->'list') = 'array' then d.data->'list' else '[]'::jsonb end) p
+      where d.id = '_people' and lower(p->>'email') = lower(p_email))
+  )
+$$;
+revoke all on function public.pt_is_allowed(text) from public, anon, authenticated;
+-- For the signed-in person only (so nobody can test other addresses).
+create or replace function public.pt_allowed_me() returns boolean
+language sql stable security definer set search_path = ''
+as $$ select public.pt_is_allowed(public.my_email()) $$;
+revoke all on function public.pt_allowed_me() from public, anon;
+grant execute on function public.pt_allowed_me() to authenticated;
+-- The sign-in hook. Turn it on in the dashboard: Authentication -> Hooks -> Customize Access Token (JWT) Claims ->
+-- Postgres, schema public, function pt_access_token_hook. No session for anyone not on the list, and sessions stop
+-- renewing (within the hour) for anyone removed from it.
+create or replace function public.pt_access_token_hook(event jsonb) returns jsonb
+language plpgsql stable security definer set search_path = ''
+as $$
+declare email text;
+begin
+  select u.email into email from auth.users u where u.id = (event->>'user_id')::uuid;
+  if public.pt_is_allowed(email) then return event; end if;
+  return jsonb_build_object('error', jsonb_build_object('http_code', 403,
+    'message', 'This email hasn''t been added to ProTracker. Ask the person who runs it to add you.'));
+end $$;
+revoke all on function public.pt_access_token_hook(jsonb) from public, anon, authenticated;
+grant usage on schema public to supabase_auth_admin;
+grant execute on function public.pt_access_token_hook(jsonb) to supabase_auth_admin;
+-- Backstop in the access rules: no reading or saving for anyone not on the list, even with a session.
+alter policy "own docs: read" on public.pt_docs using (user_id = (select auth.uid()) and (select public.pt_allowed_me()));
+alter policy "own docs: add" on public.pt_docs with check (user_id = (select auth.uid()) and (select public.pt_allowed_me()));
+alter policy "own docs: change" on public.pt_docs using (user_id = (select auth.uid()) and (select public.pt_allowed_me())) with check (user_id = (select auth.uid()) and (select public.pt_allowed_me()));
+alter policy "own docs: remove" on public.pt_docs using (user_id = (select auth.uid()) and (select public.pt_allowed_me()));
+alter policy "read own or admin" on public.team_tasks
+  using (public.is_admin() or ((assignee_email = public.my_email() or created_by = (select auth.uid())) and (select public.pt_allowed_me())));
+alter policy "change own or admin" on public.team_tasks
+  using (public.is_admin() or ((assignee_email = public.my_email() or (created_by = (select auth.uid()) and public.can_assign())) and (select public.pt_allowed_me())))
+  with check (public.is_admin() or ((assignee_email = public.my_email() or (created_by = (select auth.uid()) and public.can_assign())) and (select public.pt_allowed_me())));
