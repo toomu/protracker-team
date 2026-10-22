@@ -3246,17 +3246,15 @@
   }
 
   function renderTeamSync() {
+    // The hosted app reads ticks by itself, so there's nothing to say or connect: the row only shows in claude.ai.
+    $("team-sync").hidden = !!sb;
+    if (sb) return;
     const msg = $("team-sync-msg"), connect = $("team-sync-connect");
     const ticked = Object.keys(team.progress).length;
     const ago = team.syncedAt ? new Date(team.syncedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : "";
     const asOf = ago ? ` Last updated ${ago}.` : "";
     connect.hidden = !mcp || !(supaState === "ask" || supaState === "denied");
     connect.textContent = supaState === "denied" ? "Allow Supabase" : "Connect Supabase";
-    if (sb) {
-      msg.textContent = supaState === "error" ? `Couldn't check team ticks just now${supaError ? ` (${supaError})` : ""}. ProTracker tries again every minute.` + asOf
-        : `Team ticks update by themselves. ${ticked} ${ticked === 1 ? "task is" : "tasks are"} ticked by team members. Their ticks show as ✓ name, apart from your own.`;
-      return;
-    }
     if (!mcp) { msg.textContent = "Team ticks update by themselves inside claude.ai, through your Supabase connector." + asOf; return; }
     const count = `${ticked} ${ticked === 1 ? "task is" : "tasks are"} ticked by team members`;
     msg.textContent = supaState === "ok" ? `Updates by itself from Supabase. ${count} (checked ${ago}). Their ticks show as ✓ name, apart from your own.`
