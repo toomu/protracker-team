@@ -826,6 +826,13 @@
               <button type="button" data-pmode="full" aria-pressed="false">Full</button>
             </div>
           </div>
+          <div class="team-row" id="person-assign-row" hidden>
+            <span class="label">Can assign tasks</span>
+            <div class="seg sort-seg" id="person-assign" role="group" aria-label="Whether this person can assign tasks to others">
+              <button type="button" data-passign="no" aria-pressed="true">No</button>
+              <button type="button" data-passign="yes" aria-pressed="false">Yes</button>
+            </div>
+          </div>
           <div class="team-row">
             <input id="person-email" type="email" inputmode="email" autocapitalize="none" maxlength="120" placeholder="Their email for the team app" aria-label="This person's email for the team app">
           </div>
@@ -896,7 +903,7 @@
     </div>
     <p class="hint" id="best-day"></p>
   </div>
-  <p class="account" id="account" hidden><span id="account-email"></span><button class="act quiet" id="push-toggle" type="button" hidden>Turn on notifications</button><button class="act quiet" id="sign-out" type="button">Sign out</button></p>
+  <p class="account" id="account" hidden><span id="account-email"></span><button class="act quiet" id="my-name" type="button" hidden></button><button class="act quiet" id="push-toggle" type="button" hidden>Turn on notifications</button><button class="act quiet" id="sign-out" type="button">Sign out</button></p>
 </div>
 
 <div class="notice" id="notice" role="status" hidden></div>
@@ -1162,7 +1169,7 @@
     if (view === "tree") renderTree();
     if (view === "people") renderPeople();
     if (view === "search") renderSearch();
-    if (memberMode) renderAssigned();
+    if (sb && me) renderAssigned();
     renderPublish();
   }
 
@@ -3023,7 +3030,7 @@
     }
     rm.textContent = removeArmed === p.id ? "Tap again to remove" : "Remove";
     renderTeamBox(p);
-    $("people-hint").textContent = sb && isOwner
+    $("people-hint").textContent = sb && (isOwner || canAssign)
       ? "Type @name when adding a task to assign it, and tap a name above to rename that person. People with an email see the tasks you assign them when they sign in to ProTracker; Simple or Full sets which version they get."
       : "People are only for your reference. They don't see or use this app. Type @name when adding a task to assign it, and tap a name above to rename that person.";
     $("people-task-new").placeholder = `Add a task for ${p.name} to the Backlog`;
@@ -3219,7 +3226,7 @@
   }
   // Hosted: signed in to Supabase, the page reads the ticks itself (the owner sees every pushed task).
   async function pullHosted() {
-    const { data, error } = await sb.from("team_tasks").select("source_id, assignee_email, completed_at").eq("done", true).not("source_id", "is", null);
+    const { data, error } = await sb.from("team_tasks").select("source_id, assignee_email, completed_at").eq("done", true).not("source_id", "is", null).eq("created_by", me.id);
     if (error) { supaState = "error"; supaError = error.message || ""; render(); return; }
     supaState = "ok"; supaError = "";
     applyProgress(data || []);
@@ -3302,7 +3309,25 @@
     $("person-mode-row").hidden = !(sb && isOwner && validEmail(email));
     const m = modes[email] || "simple";
     $("person-mode").querySelectorAll("[data-pmode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.pmode === m)));
+    // Assigning needs People and @name, so it's offered with the Full version only.
+    $("person-assign-row").hidden = $("person-mode-row").hidden || m !== "full";
+    const a = assigners[email] ? "yes" : "no";
+    $("person-assign").querySelectorAll("[data-passign]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.passign === a)));
   }
+  $("person-assign").querySelectorAll("[data-passign]").forEach(b => b.addEventListener("click", async () => {
+    const p = personById(curPerson), email = p && (p.email || "").toLowerCase();
+    const yes = b.dataset.passign === "yes";
+    if (!email || !validEmail(email) || !!assigners[email] === yes) return;
+    assigners = { ...assigners, [email]: yes };
+    renderPeople();
+    const { error } = await sb.from("pt_members").upsert({ email, mode: modes[email] || "simple", can_assign: yes, updated_at: new Date().toISOString() }, { onConflict: "email" });
+    if (error) {
+      assigners = { ...assigners, [email]: !yes };
+      renderPeople();
+      notice("Couldn't change that: " + (error.message || "error"));
+    } else notice(yes ? `${p.name} can now assign tasks to people (with an email in their People), the next time they open ProTracker.`
+      : `${p.name} can no longer assign tasks. Tasks they already assigned stay until they're removed.`);
+  }));
   $("person-mode").querySelectorAll("[data-pmode]").forEach(b => b.addEventListener("click", async () => {
     const p = personById(curPerson), email = p && (p.email || "").toLowerCase();
     if (!email || !validEmail(email) || (modes[email] || "simple") === b.dataset.pmode) return;
@@ -3401,6 +3426,10 @@
     list.forEach(t => { if (!seen.has(t.sid)) out.push(t); });
     return out;
   }
+  // The owner, and members the owner lets assign, keep the lists of the people they assign to in step.
+  const canSync = () => !!(sb && me && (isOwner || canAssign));
+  // The name a person's team sees on tasks they assign ("From Karan"): set with the name button by Sign out.
+  const myName = () => (me && me.name) || (me ? me.email.split("@")[0] : "");
   function teamPlan() {
     return people.filter(x => validEmail((x.email || "").toLowerCase())).map(x => ({
       email: x.email.toLowerCase(),
@@ -3411,8 +3440,8 @@
   }
   // Called from every render; only a real change (or the first load) starts a sync, a moment later.
   function scheduleTeamSync() {
-    if (!sb || !isOwner || !store || !store.ready || !store.ready()) return;
-    const plan = teamPlan(), sig = JSON.stringify(plan);
+    if (!canSync() || !store || !store.ready || !store.ready()) return;
+    const plan = teamPlan(), sig = JSON.stringify([myName(), plan]);
     if (sig === syncSig) return;
     clearTimeout(syncTimer);
     syncTimer = setTimeout(() => teamSync(plan, sig), 1500);
@@ -3421,9 +3450,12 @@
     if (syncing) { syncAgain = true; return; }
     syncing = true;
     try {
-      const { data: cur, error } = await sb.from("team_tasks").select("id, assignee_email, source_id, title, tags, sort, parent_id").not("source_id", "is", null);
+      // Only the tasks this person assigned: each assigner keeps their own in step.
+      const { data: cur, error } = await sb.from("team_tasks").select("id, assignee_email, source_id, title, tags, sort, parent_id, assigned_by_name")
+        .not("source_id", "is", null).eq("created_by", me.id);
       if (error) throw error;
       const key = (email, sid) => email + "\n" + sid;
+      const name = myName().slice(0, 60);
       const have = new Map((cur || []).map(r => [key(r.assignee_email, r.source_id), r]));
       const keep = new Set(), add = [], change = [], fresh = new Map();
       const now = new Date().toISOString();
@@ -3432,11 +3464,11 @@
         keep.add(k);
         if (!old) {
           add.push({ id: crypto.randomUUID(), assignee_email: p.email, source_id: t.sid, title: t.title, tags: t.tags,
-            done: t.done, completed_at: t.done ? now : null, parent_id: null, sort: t.sort, created_by: me.id });
+            done: t.done, completed_at: t.done ? now : null, parent_id: null, sort: t.sort, created_by: me.id, assigned_by_name: name });
           if (!t.done) { if (!fresh.has(p.email)) fresh.set(p.email, []); fresh.get(p.email).push(t.title); }
-        } else if (old.title !== t.title || old.sort !== t.sort || old.parent_id || (old.tags || []).join(" ") !== t.tags.join(" ")) {
+        } else if (old.title !== t.title || old.sort !== t.sort || old.parent_id || (old.tags || []).join(" ") !== t.tags.join(" ") || (old.assigned_by_name || "") !== name) {
           // Only these columns are sent, so the member's tick (done, completed_at) stays as it is.
-          change.push({ id: old.id, assignee_email: old.assignee_email, source_id: old.source_id, title: t.title, tags: t.tags, sort: t.sort, parent_id: null });
+          change.push({ id: old.id, assignee_email: old.assignee_email, source_id: old.source_id, title: t.title, tags: t.tags, sort: t.sort, parent_id: null, assigned_by_name: name });
         }
       }));
       // Only the lists of people in People with an email are kept in step (like a publish), so pushed tasks
@@ -3462,7 +3494,7 @@
       for (const [email, titles] of fresh) {
         const short = titles.slice(0, 3).map(x => x.length > 60 ? x.slice(0, 58) + "…" : x);
         sb.functions.invoke("push", { body: { action: "notify", email,
-          title: titles.length === 1 ? "New task from ProTracker" : `${titles.length} new tasks from ProTracker`,
+          title: titles.length === 1 ? `New task from ${myName()}` : `${titles.length} new tasks from ${myName()}`,
           body: short.join(" · ") + (titles.length > 3 ? ` +${titles.length - 3} more` : "") } }).catch(() => {});
       }
     } catch (e) {
@@ -3481,7 +3513,9 @@
     $("team-publish").hidden = true;
     $("team-copy").hidden = true;
     $("team-link").hidden = true;
-    $("side-publish").hidden = !isOwner || !people.length;
+    $("side-publish").hidden = !canSync() || !people.length;
+    $("my-name").hidden = !canSync();
+    $("my-name").textContent = "Your name: " + myName();
     scheduleTeamSync();
     if ($("side-publish").hidden) return;
     $("side-publish").querySelector(".label").textContent = "Team lists";
@@ -3491,7 +3525,7 @@
     const when = syncedAt ? new Date(syncedAt).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }) : "";
     const state = syncErr === "offline" ? "Offline: changes go to the team when you're back online."
       : syncErr ? `Couldn't update the team lists (${syncErr}). Trying again shortly.`
-      : syncing || syncSig !== JSON.stringify(plan) ? "Updating the team lists…"
+      : syncing || syncSig !== JSON.stringify([myName(), plan]) ? "Updating the team lists…"
       : `Up to date${when ? ` (${when}${syncNote ? `: ${syncNote}` : ""})` : ""}.`;
     $("team-msg").textContent = !plan.length ? "Add an email to someone to send them their tasks in the team app."
       : `${state} Tasks you assign go to the team app by themselves: ${total} ${total === 1 ? "task" : "tasks"} for `
@@ -3928,7 +3962,8 @@
   }
   function signedIn(session) {
     if (me) return;
-    me = { id: session.user.id, email: String(session.user.email || "").toLowerCase() };
+    me = { id: session.user.id, email: String(session.user.email || "").toLowerCase(),
+      name: String((session.user.user_metadata && session.user.user_metadata.name) || "").slice(0, 60) };
     document.body.classList.remove("signed-out");
     $("signin").hidden = true;
     $("account").hidden = false;
@@ -3954,10 +3989,12 @@
     if (!isOwner && !memberMode) memberSetup();
     render();
     if (!isOwner) return;
-    sb.from("pt_members").select("email, mode").then(({ data: rows }) => {
+    sb.from("pt_members").select("email, mode, can_assign").then(({ data: rows }) => {
       modes = Object.fromEntries((rows || []).map(r => [r.email, r.mode]));
+      assigners = Object.fromEntries((rows || []).map(r => [r.email, !!r.can_assign]));
       render();
     });
+    assignedFeed();   // tasks someone else assigned to the owner show in an Assigned tab
     let t = null;
     sb.channel("pt-team").on("postgres_changes", { event: "*", schema: "public", table: "team_tasks" }, () => {
       clearTimeout(t);
@@ -3970,6 +4007,8 @@
   // own tasks (their private ProTracker data). Full: all of ProTracker, plus an Assigned tab with that list.
   // Ticks on assigned tasks go to team_tasks (queued on the device while offline); the owner sees them as ✓ name.
   let modes = {};          // owner: email -> "simple" | "full"
+  let assigners = {};      // owner: email -> may assign tasks (Full only)
+  let canAssign = false;   // a member the owner lets assign tasks: they sync their own assignments like the owner
   let assigned = [];       // a member's rows of team_tasks pushed by the owner
   let aTag = null;         // tag filter on the list
   async function memberSetup() {
@@ -3977,10 +4016,27 @@
     const KEY = "protracker.mode." + me.id;
     let cached = "";
     try { cached = localStorage.getItem(KEY) || ""; } catch {}
+    const AKEY = "protracker.assign." + me.id;
+    try { canAssign = cached === "full" && localStorage.getItem(AKEY) === "1"; } catch {}
     applyMember(cached === "full" ? "full" : "simple");
     replayTeamAppQueue();
-    loadAssigned();
+    assignedFeed();
     renderPush();
+    const { data, error } = await sb.from("pt_members").select("mode, can_assign").eq("email", me.email).maybeSingle();
+    if (error) return;
+    const mode = data && data.mode === "full" ? "full" : "simple";
+    const may = mode === "full" && !!(data && data.can_assign);
+    try { localStorage.setItem(KEY, mode); localStorage.setItem(AKEY, may ? "1" : "0"); } catch {}
+    if (may !== canAssign) { canAssign = may; if (may) watchMyAssignments(); render(); }
+    else if (may) watchMyAssignments();
+    if (mode !== memberMode) applyMember(mode);
+  }
+  // Tasks assigned to this person by someone else: loaded, kept current live, and re-read when back online.
+  let feeding = false;
+  function assignedFeed() {
+    if (feeding) return;
+    feeding = true;
+    loadAssigned();
     let t = null;
     sb.channel("pt-assigned").on("postgres_changes", { event: "*", schema: "public", table: "team_tasks", filter: "assignee_email=eq." + me.email }, () => {
       clearTimeout(t);
@@ -3988,16 +4044,22 @@
     }).subscribe();
     addEventListener("online", () => { flushTicks(); loadAssigned(); });
     document.addEventListener("visibilitychange", () => { if (!document.hidden) { flushTicks(); loadAssigned(); } });
-    const { data, error } = await sb.from("pt_members").select("mode").eq("email", me.email).maybeSingle();
-    if (error) return;
-    const mode = data && data.mode === "full" ? "full" : "simple";
-    try { localStorage.setItem(KEY, mode); } catch {}
-    if (mode !== memberMode) applyMember(mode);
+  }
+  // A member who assigns: ticks on the tasks they gave out come back live, as they do for the owner.
+  let watching = false;
+  function watchMyAssignments() {
+    if (watching) return;
+    watching = true;
+    let t = null;
+    sb.channel("pt-given").on("postgres_changes", { event: "*", schema: "public", table: "team_tasks", filter: "created_by=eq." + me.id }, () => {
+      clearTimeout(t);
+      t = setTimeout(pullTeam, 800);
+    }).subscribe();
+    pullTeam();
   }
   function applyMember(mode) {
     memberMode = mode;
     document.body.classList.toggle("simple", mode === "simple");
-    $("nav-assigned").hidden = mode !== "full";
     $("mine-form").hidden = mode !== "simple";
     $("assigned-title").textContent = mode === "simple" ? "My tasks" : "Assigned to me";
     // The status line (loading, offline) sits under whichever list is shown.
@@ -4018,8 +4080,8 @@
     if (loadingA) return;
     loadingA = true;
     try {
-      const { data, error } = await sb.from("team_tasks").select("id, source_id, title, tags, done, completed_at, sort, created_at")
-        .eq("assignee_email", me.email).not("source_id", "is", null);
+      const { data, error } = await sb.from("team_tasks").select("id, source_id, title, tags, done, completed_at, sort, created_at, assigned_by, assigned_by_name")
+        .eq("assignee_email", me.email).not("source_id", "is", null).or("created_by.is.null,created_by.neq." + me.id);
       if (error) return;
       writeJSON(aCacheKey(), data || []);
       assigned = withTicks(data || []);
@@ -4080,7 +4142,12 @@
       <div class="task-body"><div class="title"></div><div class="tags"></div></div></div>`;
     showTitle(li.querySelector(".title"), t.title);
     const tags = li.querySelector(".tags");
-    if (!own) tags.append(Object.assign(document.createElement("span"), { className: "place hour", textContent: "Assigned" }));
+    if (!own) {
+      const from = fromName(t);
+      const label = Object.assign(document.createElement("span"), { className: "place hour", textContent: from ? "From " + from : "Assigned" });
+      if (t.assigned_by) label.title = "Assigned by " + t.assigned_by;
+      tags.append(label);
+    }
     tagsOf(t).forEach(tag => { const c = chip(tag); c.onclick = () => { aTag = aTag === tag ? null : tag; renderAssigned(); }; tags.append(c); });
     const tick = () => own ? tickOwn(t) : tickAssigned(t);
     li.querySelector(".check").onclick = tick;
@@ -4093,6 +4160,12 @@
     }
     swipeRow(li, tick, own ? () => deleteOwn(t) : null);
     return li;
+  }
+  // Who assigned it: their name in this person's People if they're there, else the name they chose, else their email.
+  function fromName(r) {
+    const email = String(r.assigned_by || "").toLowerCase();
+    const p = email && people.find(x => (x.email || "").toLowerCase() === email);
+    return (p && p.name) || r.assigned_by_name || (email ? email.split("@")[0] : "");
   }
   function tickOwn(t, quiet) {
     toggleDone(t);
@@ -4144,6 +4217,8 @@
   function renderAssigned() {
     const openA = assigned.filter(r => !r.done).length;
     $("nav-assigned").textContent = openA ? `Assigned (${openA})` : "Assigned";
+    // Full members always have the tab; the owner only once someone has assigned them something.
+    $("nav-assigned").hidden = !(memberMode === "full" || (isOwner && assigned.length > 0));
     if (view !== "assigned") return;
     // Simple: assigned and own tasks together. Full: only the assigned ones (own tasks live in the other views).
     const items = assigned.map(r => ({ kind: "assigned", t: r, key: r.sort, at: Date.parse(r.completed_at || "") || 0 }));
@@ -4343,6 +4418,18 @@
     $("signin-code").value = "";
     $("signin-hint").textContent = "Enter your email and we'll send you a sign-in code.";
     showError("signin-error", "");
+  });
+  // The name shown on tasks this person assigns ("From Karan"), kept in their sign-in's profile.
+  $("my-name").addEventListener("click", async () => {
+    const v = prompt("Your name, as your team sees it on tasks you assign:", myName());
+    if (v === null) return;
+    const name = v.replace(/\s+/g, " ").trim().slice(0, 60);
+    if (!name || name === me.name) return;
+    const { error } = await sb.auth.updateUser({ data: { name } });
+    if (error) { notice("Couldn't save your name: " + error.message); return; }
+    me.name = name;
+    render();   // the tasks you assigned take the new name on the next sync
+    notice(`Your team now sees "${name}" on tasks you assign.`);
   });
   $("sign-out").addEventListener("click", async () => {
     if (!sb) return;
