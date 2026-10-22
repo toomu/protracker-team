@@ -5,7 +5,7 @@ ProTracker as its own web app at **https://team.indexhomes.in/** (https://protra
 - `build.py`: wraps `../tasks.html` into `index.html`. It adds the install tags, supabase-js and the service worker at the `<!--hosted-head…-->` marker, and copies the files below.
 - `deploy.sh "What changed"`: builds it into both public repos and pushes: `toomu/protracker-app` (protracker.indexhomes.in) and `toomu/protracker-team` (team.indexhomes.in, the old team app's address). GitHub Pages serves them.
 - `CNAME`: protracker.indexhomes.in (deploy.sh writes each repo's own).
-- `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`: the blue Index Homes "1" on white. Add to Home Screen opens it full screen.
+- `manifest.webmanifest`, `icon-192.png`, `icon-512.png`, `apple-touch-icon.png`: the Index Homes gold "1" on navy. Add to Home Screen opens it full screen.
 - `sw.js`: opens offline (the app's files network-first; supabase-js and fonts cache-first; never touches supabase.co).
 - `schema.sql`: the `public.pt_docs` table, where each person's data lives (only they can read or change it).
 - `functions/handwriting/index.ts`: the Edge Function `handwriting`, which reads the writing pad with Claude. It is deployed with JWT verification on.
