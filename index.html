@@ -683,10 +683,10 @@
         </div>
         <div class="composer-actions">
           <button class="btn btn-ghost" id="add-hour" type="button" disabled>Add to Current Hour</button>
-          <button class="btn btn-primary" id="add-backlog" type="submit" disabled>Add to Backlog</button>
+          <button class="btn btn-primary" id="add-backlog" type="submit" disabled>Add to Repo</button>
         </div>
       </form>
-      <p class="hint" id="composer-hint">Return adds to the Backlog, Shift+Return starts a new line. #tag tags it, @name assigns it, !0 to !5 sets its priority.</p>
+      <p class="hint" id="composer-hint">Return adds to the Repo, Shift+Return starts a new line. #tag tags it, @name assigns it, !0 to !5 sets its priority.</p>
       </div>
       <section class="pad" id="pad" hidden aria-label="Writing pad">
         <div class="review" id="review" hidden>
@@ -695,7 +695,7 @@
           <div class="review-actions">
             <button class="btn btn-ghost" id="review-discard" type="button">Discard</button>
             <button class="btn btn-ghost" id="review-add" type="button">Add to Current Hour</button>
-            <button class="btn btn-primary" id="review-backlog" type="button">Add to Backlog</button>
+            <button class="btn btn-primary" id="review-backlog" type="button">Add to Repo</button>
           </div>
         </div>
         <div class="pad-body">
@@ -921,7 +921,8 @@
 
   // Task: {id, title, tags[], people[], done, createdAt, completedAt|null, hourStart|null, hourAddedAt, inRepo, stagedAt|null, parentId|null, order}
   // parentId and order arrange tasks into the Tree view's outlines. people holds person ids.
-  // Five places: Current hour, Backlog, Stage, Finished, Repo. New tasks go to the Backlog.
+  // Five places: Current hour, Backlog, Stage, Finished, Repo. New tasks go to the Repo (the inbox); tasks being
+  // lined up are moved from there to the Backlog.
   // A task is in the current hour while its hourStart equals the start of this clock hour. When the hour ends,
   // its unfinished tasks are in Stage (an earlier hourStart, not done) until moved on; finished ones are in Finished.
   // To Stage puts a task there by hand: stagedAt is set (and hourStart cleared); every other move clears stagedAt.
@@ -1562,8 +1563,8 @@
     if (!items.length) {
       ul.append(sub === "done" ? emptyRow("No finished tasks yet", "Tasks you tick off show up here (ones ticked in the current hour, once it ends).")
         : sub === "stage" ? emptyRow("Stage is empty", "When an hour ends, its unfinished tasks land here.")
-        : sub === "repo" ? emptyRow("Repo is empty", "Stash backlog tasks here to get them out of the way.")
-        : emptyRow("Backlog is empty", "New tasks, and tasks you move out of the current hour or Stage, land here."));
+        : sub === "repo" ? emptyRow("Repo is empty", "New tasks land here. Move the ones you're lining up to the Backlog.")
+        : emptyRow("Backlog is empty", "Line tasks up here with To Backlog from the Repo, Stage or the current hour."));
       return;
     }
     if (!visible.length) {
@@ -1608,8 +1609,8 @@
     $("add-backlog").disabled = !has;
     $("add-hour").disabled = !has || full;
     $("composer-hint").textContent = full
-      ? `Return adds to the Backlog. The current hour is full (${CAPACITY}/${CAPACITY}).`
-      : "Return adds to the Backlog, Shift+Return starts a new line. #tag tags it, @name assigns it, !0 to !5 sets its priority (5 is highest).";
+      ? `Return adds to the Repo. The current hour is full (${CAPACITY}/${CAPACITY}).`
+      : "Return adds to the Repo, Shift+Return starts a new line. #tag tags it, @name assigns it, !0 to !5 sets its priority (5 is highest).";
   }
 
   // ---- Stats ----
@@ -1693,7 +1694,7 @@
   function newTask({ title, tags, people, toHour, parentId, priority }) {
     const now = Date.now();
     return { title, tags, people: people || [], priority: priority || 0, done: false, createdAt: now, completedAt: null,
-      hourStart: toHour ? curHour : null, hourAddedAt: toHour ? now : null, inRepo: false,
+      hourStart: toHour ? curHour : null, hourAddedAt: toHour ? now : null, inRepo: !toHour,
       parentId: parentId || null, order: now };
   }
 
@@ -2015,7 +2016,7 @@
   input.addEventListener("input", () => { autoGrow(); syncComposer(); });
   input.addEventListener("keydown", (e) => {
     if (e.isComposing) return;
-    // Return adds to the Backlog; Shift+Return starts a new line.
+    // Return adds to the Repo; Shift+Return starts a new line.
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComposer(false); }
   });
   function submitComposer(toHour) {
@@ -2024,6 +2025,7 @@
     if (toHour && hourFull()) { syncComposer(); return; }
     if (addTask(v, toHour)) {
       input.value = "";
+      if (!toHour) showRepo();
       autoGrow();
       hideSuggest();
       syncComposer();
@@ -2067,6 +2069,8 @@
     try { selectView(r); } finally { routePop = false; }
   });
   document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => selectView(b.dataset.view)));
+  // After adding tasks (they start in the Repo), show the Repo so they don't seem to vanish.
+  const showRepo = () => { if (sub !== "repo") $("sub-repo").click(); };
   document.querySelectorAll("[data-sub]").forEach(b => b.addEventListener("click", () => {
     sub = b.dataset.sub;
     tagFilter = null;
@@ -3050,7 +3054,7 @@
     $("people-hint").textContent = sb && (isOwner || canAssign)
       ? "Type @name when adding a task to assign it, and tap a name above to rename that person. People with an email see the tasks you assign them when they sign in to ProTracker; Simple or Full sets which version they get."
       : "People are only for your reference. They don't see or use this app. Type @name when adding a task to assign it, and tap a name above to rename that person.";
-    $("people-task-new").placeholder = `Add a task for ${p.name} to the Backlog`;
+    $("people-task-new").placeholder = `Add a task for ${p.name} to the Repo`;
 
     const mine = tasks.filter(t => peopleOf(t).includes(p.id));
     const open = mine.filter(t => !t.done).sort((a, b) => byPrio(a, b) || placeRank(a) - placeRank(b) || (b.createdAt || 0) - (a.createdAt || 0));
@@ -3300,9 +3304,9 @@
     pullTeam();
   });
 
-  // A person's tasks (Repo left out), each nested under its nearest ancestor that's also theirs.
+  // A person's tasks (wherever they are, Repo included: new tasks start there), each nested under its nearest ancestor that's also theirs.
   function publishTasks(p) {
-    const mine = tasks.filter(t => !isRepo(t) && peopleOf(t).includes(p.id));
+    const mine = tasks.filter(t => peopleOf(t).includes(p.id));
     const ids = new Set(mine.map(t => t.id));
     const byId = new Map(tasks.map(t => [t.id, t]));
     return mine.map(t => {
@@ -3830,7 +3834,7 @@
     reviewList.addEventListener("input", updateAddLabel);
     reviewList.addEventListener("change", updateAddLabel);
     $("review-discard").onclick = () => { review.hidden = true; rows = []; setMsg(""); };
-    // Adding to the current hour fills its free slots; anything beyond CAPACITY goes to the Backlog.
+    // Adding to the current hour fills its free slots; anything beyond CAPACITY goes to the Repo.
     function addReviewed(toHour) {
       const items = picked();
       if (!items.length || !store) return;
@@ -3845,9 +3849,9 @@
       rows = [];
       strokes = []; redraw(); syncButtons();
       const n = items.length, plural = (k) => k === 1 ? "1 task" : `${k} tasks`;
-      if (!toHour) setMsg(`Added ${plural(n)} to the Backlog.`);
+      if (!toHour) { setMsg(`Added ${plural(n)} to the Repo.`); showRepo(); }
       else if (toHourCount === n) setMsg(`Added ${plural(n)} to the current hour.`);
-      else setMsg(`Added ${plural(toHourCount)} to the current hour. The hour only holds ${CAPACITY}, so ${plural(n - toHourCount)} went to the Backlog.`);
+      else setMsg(`Added ${plural(toHourCount)} to the current hour. The hour only holds ${CAPACITY}, so ${plural(n - toHourCount)} went to the Repo.`);
     }
     $("review-add").onclick = () => addReviewed(true);
     $("review-backlog").onclick = () => addReviewed(false);
@@ -4286,7 +4290,8 @@
     if (view !== "assigned") return;
     // Simple: assigned and own tasks together. Full: only the assigned ones (own tasks live in the other views).
     const items = assigned.map(r => ({ kind: "assigned", t: r, key: r.sort, at: Date.parse(r.completed_at || "") || 0 }));
-    if (memberMode === "simple") tasks.filter(t => !isRepo(t)).forEach(t => items.push({ kind: "own", t, key: 1e9 - (t.createdAt || 0), at: t.completedAt || 0 }));
+    // Simple shows all their own tasks wherever they are (new ones start in the Repo).
+    if (memberMode === "simple") tasks.forEach(t => items.push({ kind: "own", t, key: 1e9 - (t.createdAt || 0), at: t.completedAt || 0 }));
     const counts = new Map();
     items.forEach(i => tagsOf(i.t).forEach(tag => counts.set(tag, (counts.get(tag) || 0) + 1)));
     if (aTag && !counts.has(aTag)) aTag = null;
