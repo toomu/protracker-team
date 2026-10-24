@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <style>
-  /* Layout: one centered column for iPad. Writing pad on top, then the current hour (max 25 tasks, CAPACITY; when it ends, unfinished ones go to Stage), then Backlog / Stage / Finished / Repo, typed composer at the bottom. Tree (tags on the left, an outline per tag on the right) and Stats are further views. */
+  /* Layout: one centered column for iPad. Writing pad on top, then the current hour (max 25 tasks, CAPACITY; when it ends, unfinished ones go to the Backlog), then Stage / Backlog / Finished / Repo, typed composer at the bottom. Tree (tags on the left, an outline per tag on the right) and Stats are further views. */
   :root {
     --paper: #f3f5f8;
     --sheet: #ffffff;
@@ -740,17 +740,17 @@
 
     <section class="section" id="backlog-section" aria-labelledby="backlog-title">
       <div class="section-head">
-        <h2 id="backlog-title">Backlog</h2>
+        <h2 id="backlog-title">Stage</h2>
         <div class="seg sort-seg" id="backlog-sort" role="group" aria-label="Sort tasks">
           <button type="button" data-sort="prio" aria-pressed="true">Priority</button>
           <button type="button" data-sort="new" aria-pressed="false">Latest added</button>
           <button type="button" data-sort="old" aria-pressed="false">Oldest added</button>
         </div>
       </div>
-      <p class="hint">New tasks land in the Backlog. When an hour ends, its unfinished tasks go to Stage. Move tasks into the current hour, tick them off, or stash them in Repo to get them out of the way.</p>
-      <div class="tabs" role="tablist" aria-label="Backlog lists">
-        <button class="tab" role="tab" id="sub-open" data-sub="open" aria-selected="true">Backlog</button>
-        <button class="tab" role="tab" id="sub-stage" data-sub="stage" aria-selected="false">Stage</button>
+      <p class="hint">New tasks land in the Repo; line them up in Stage. When an hour ends, its unfinished tasks go to the Backlog. Move tasks into the current hour, tick them off, or put them back in the Repo to get them out of the way.</p>
+      <div class="tabs" role="tablist" aria-label="Stage lists">
+        <button class="tab" role="tab" id="sub-open" data-sub="open" aria-selected="true">Stage</button>
+        <button class="tab" role="tab" id="sub-stage" data-sub="stage" aria-selected="false">Backlog</button>
         <button class="tab" role="tab" id="sub-done" data-sub="done" aria-selected="false">Finished</button>
         <button class="tab" role="tab" id="sub-repo" data-sub="repo" aria-selected="false">Repo</button>
       </div>
@@ -921,6 +921,9 @@
 
   // Task: {id, title, tags[], people[], done, createdAt, completedAt|null, hourStart|null, hourAddedAt, inRepo, stagedAt|null, parentId|null, order}
   // parentId and order arrange tasks into the Tree view's outlines. people holds person ids.
+  // NAMES ON SCREEN ARE SWAPPED (since Oct 24 2026): the code's "backlog" (inBacklog, moveToBacklog, sub "open",
+  // #sub-open) is shown as **Stage**, and the code's "stage" (inStage, moveToStage, stagedAt, sub "stage") is shown
+  // as **Backlog**. The comments below use the code's names.
   // Five places: Current hour, Backlog, Stage, Finished, Repo. New tasks go to the Repo (the inbox); tasks being
   // lined up are moved from there to the Backlog.
   // A task is in the current hour while its hourStart equals the start of this clock hour. When the hour ends,
@@ -1147,7 +1150,7 @@
   }
   function moveToHour(t) {
     if (hourFull()) {
-      notice(`The current hour is full (${CAPACITY} tasks). Finish one, or move one to the Backlog, to make room.`);
+      notice(`The current hour is full (${CAPACITY} tasks). Finish one, or move one to Stage or the Backlog, to make room.`);
       return;
     }
     store.update(t.id, { hourStart: curHour, hourAddedAt: Date.now(), inRepo: false, stagedAt: null });
@@ -1433,14 +1436,14 @@
       const p = personById(id);
       const c = personChip(p);
       c.setAttribute("aria-pressed", String(id === personFilter));
-      c.setAttribute("aria-label", `Show only tasks for ${p.name} in the backlog`);
+      c.setAttribute("aria-label", `Show only tasks for ${p.name} in this list`);
       c.onclick = () => setPersonFilter(id);
       box.append(c);
     });
     tagsOf(t).forEach(tag => {
       const c = chip(tag);
       c.setAttribute("aria-pressed", String(tag === tagFilter));
-      c.setAttribute("aria-label", `Show only #${tag} tasks in the backlog`);
+      c.setAttribute("aria-label", `Show only #${tag} tasks in this list`);
       c.onclick = () => setTagFilter(tag);
       box.append(c);
     });
@@ -1477,13 +1480,13 @@
     const ul = $("hour-list");
     ul.replaceChildren();
     if (!list.length) {
-      ul.append(emptyRow("Nothing planned for this hour", `Tap Add at the top to plan up to ${CAPACITY} tasks, or move some up from the Backlog.`));
+      ul.append(emptyRow("Nothing planned for this hour", `Tap Add at the top to plan up to ${CAPACITY} tasks, or move some up from Stage.`));
       return;
     }
     // Highest priority first; equal priorities in the order they were added to the hour.
     [...list].sort(byPrio).forEach(t => ul.append(taskRow(t, [
-      { label: "To Backlog", quiet: true, run: moveToBacklog, aria: "Move to Backlog" },
-      { label: "To Stage", quiet: true, run: moveToStage, aria: "Move to Stage" },
+      { label: "To Stage", quiet: true, run: moveToBacklog, aria: "Move to Stage" },
+      { label: "To Backlog", quiet: true, run: moveToStage, aria: "Move to Backlog" },
     ])));
   }
 
@@ -1513,8 +1516,8 @@
     const repo = tasks.filter(isRepo).sort((a, b) => (a.done - b.done) || order(a, b));
     $("backlog-sort").hidden = sub === "done";
     $("backlog-sort").querySelectorAll("[data-sort]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.sort === backlogSort)));
-    $("sub-open").textContent = `Backlog (${open.length})`;
-    $("sub-stage").textContent = `Stage (${stage.length})`;
+    $("sub-open").textContent = `Stage (${open.length})`;
+    $("sub-stage").textContent = `Backlog (${stage.length})`;
     $("sub-done").textContent = `Finished (${finished.length})`;
     $("sub-repo").textContent = `Repo (${repo.length})`;
 
@@ -1562,9 +1565,9 @@
     ul.replaceChildren();
     if (!items.length) {
       ul.append(sub === "done" ? emptyRow("No finished tasks yet", "Tasks you tick off show up here (ones ticked in the current hour, once it ends).")
-        : sub === "stage" ? emptyRow("Stage is empty", "When an hour ends, its unfinished tasks land here.")
-        : sub === "repo" ? emptyRow("Repo is empty", "New tasks land here. Move the ones you're lining up to the Backlog.")
-        : emptyRow("Backlog is empty", "Line tasks up here with To Backlog from the Repo, Stage or the current hour."));
+        : sub === "stage" ? emptyRow("Backlog is empty", "When an hour ends, its unfinished tasks land here.")
+        : sub === "repo" ? emptyRow("Repo is empty", "New tasks land here. Move the ones you're lining up to Stage.")
+        : emptyRow("Stage is empty", "Line tasks up here with To Stage from the Repo, the Backlog or the current hour."));
       return;
     }
     if (!visible.length) {
@@ -1578,16 +1581,16 @@
       let actions, meta = "";
       if (sub === "repo") {
         actions = [
-          { label: "To Backlog", run: moveToBacklog },
-          { label: "To Stage", quiet: true, run: moveToStage },
+          { label: "To Stage", run: moveToBacklog },
+          { label: "To Backlog", quiet: true, run: moveToStage },
         ];
       } else if (sub === "stage") {
         actions = [
           { label: "To Hour", run: moveToHour, disabled: full, aria: full ? "Current hour is full" : "Move into the current hour" },
-          { label: "To Backlog", quiet: true, run: moveToBacklog },
+          { label: "To Stage", quiet: true, run: moveToBacklog },
           { label: "To Repo", quiet: true, run: moveToRepo },
         ];
-        meta = t.stagedAt ? "Staged " + new Date(t.stagedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) + ", " + fmtClock(t.stagedAt)
+        meta = t.stagedAt ? "Moved here " + new Date(t.stagedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) + ", " + fmtClock(t.stagedAt)
           : "From " + hourName(t.hourStart);
       } else if (sub === "done") {
         actions = [{ label: "To Repo", quiet: true, run: moveToRepo }];
@@ -1595,7 +1598,7 @@
       } else {
         actions = [
           { label: "To Hour", run: moveToHour, disabled: full, aria: full ? "Current hour is full" : "Move into the current hour" },
-          { label: "To Stage", quiet: true, run: moveToStage },
+          { label: "To Backlog", quiet: true, run: moveToStage },
           { label: "To Repo", quiet: true, run: moveToRepo },
         ];
       }
@@ -2327,7 +2330,7 @@
   function placeLabel(t) {
     if (isRepo(t)) return ["Repo", ""];
     if (inHour(t)) return ["This hour", "hour"];
-    if (inStage(t)) return ["Stage", "stage"];
+    if (inStage(t)) return ["Backlog", "stage"];
     return null;
   }
 
@@ -3008,7 +3011,7 @@
     }
   });
 
-  const placeOf = (t) => isRepo(t) ? "Repo" : inHour(t) ? "This hour" : inStage(t) ? "Stage" : "Backlog";
+  const placeOf = (t) => isRepo(t) ? "Repo" : inHour(t) ? "This hour" : inStage(t) ? "Backlog" : "Stage";
   const placeRank = (t) => inHour(t) ? 0 : inStage(t) ? 1 : isRepo(t) ? 3 : 2;
 
   function renderPeople() {
