@@ -1150,7 +1150,7 @@
   }
   function moveToHour(t) {
     if (hourFull()) {
-      notice(`The current hour is full (${CAPACITY} tasks). Finish one, or move one to Stage or the Backlog, to make room.`);
+      notice(`The current hour is full (${CAPACITY} tasks). Finish one, or move one to the Backlog, to make room.`);
       return;
     }
     store.update(t.id, { hourStart: curHour, hourAddedAt: Date.now(), inRepo: false, stagedAt: null });
@@ -1485,7 +1485,6 @@
     }
     // Highest priority first; equal priorities in the order they were added to the hour.
     [...list].sort(byPrio).forEach(t => ul.append(taskRow(t, [
-      { label: "To Stage", quiet: true, run: moveToBacklog, aria: "Move to Stage" },
       { label: "To Backlog", quiet: true, run: moveToStage, aria: "Move to Backlog" },
     ])));
   }
@@ -1567,7 +1566,7 @@
       ul.append(sub === "done" ? emptyRow("No finished tasks yet", "Tasks you tick off show up here (ones ticked in the current hour, once it ends).")
         : sub === "stage" ? emptyRow("Backlog is empty", "When an hour ends, its unfinished tasks land here.")
         : sub === "repo" ? emptyRow("Repo is empty", "New tasks land here. Move the ones you're lining up to Stage.")
-        : emptyRow("Stage is empty", "Line tasks up here with To Stage from the Repo, the Backlog or the current hour."));
+        : emptyRow("Stage is empty", "Line tasks up here with To Stage from the Repo or the Backlog."));
       return;
     }
     if (!visible.length) {
@@ -1582,7 +1581,6 @@
       if (sub === "repo") {
         actions = [
           { label: "To Stage", run: moveToBacklog },
-          { label: "To Backlog", quiet: true, run: moveToStage },
         ];
       } else if (sub === "stage") {
         actions = [
@@ -1598,7 +1596,6 @@
       } else {
         actions = [
           { label: "To Hour", run: moveToHour, disabled: full, aria: full ? "Current hour is full" : "Move into the current hour" },
-          { label: "To Backlog", quiet: true, run: moveToStage },
           { label: "To Repo", quiet: true, run: moveToRepo },
         ];
       }
