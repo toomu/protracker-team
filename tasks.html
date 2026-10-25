@@ -592,7 +592,7 @@
     .side-publish .team-row { flex-wrap: nowrap; }
     .side-publish .team-link:not([hidden]) { display: block; width: 14rem; }
     .tree-card { --indent: 20px; }
-    .place { display: none; }
+    .place:not(.from) { display: none; }   /* who assigned a task stays */
     /* Phones: the title takes the row; priority, To Hour, add and delete drop to a line below it, on the right */
     .node { flex-wrap: wrap; row-gap: 0; }
     .node .node-body { flex: 1 0 calc(100% - 132px); }
@@ -4298,7 +4298,7 @@
   // "From goutham" on an assigned task's row.
   function fromLabel(t) {
     const name = fromName({ assigned_by: t.aBy, assigned_by_name: t.aByName });
-    const s = Object.assign(document.createElement("span"), { className: "place hour", textContent: name ? "From " + name : "Assigned" });
+    const s = Object.assign(document.createElement("span"), { className: "place hour from", textContent: name ? "From " + name : "Assigned" });
     if (t.aBy) s.title = "Assigned by " + t.aBy;
     return s;
   }
@@ -4329,7 +4329,7 @@
     const tags = li.querySelector(".tags");
     if (!own) {
       const from = fromName(t);
-      const label = Object.assign(document.createElement("span"), { className: "place hour", textContent: from ? "From " + from : "Assigned" });
+      const label = Object.assign(document.createElement("span"), { className: "place hour from", textContent: from ? "From " + from : "Assigned" });
       if (t.assigned_by) label.title = "Assigned by " + t.assigned_by;
       tags.append(label);
     }
