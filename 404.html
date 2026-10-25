@@ -1622,7 +1622,8 @@
       let actions, meta = "";
       if (sub === "repo") {
         actions = [
-          { label: "To Stage", run: moveToBacklog },
+          { label: "To Hour", run: moveToHour, disabled: full, aria: full ? "Current hour is full" : "Move into the current hour" },
+          { label: "To Stage", quiet: true, run: moveToBacklog },
         ];
       } else if (sub === "stage") {
         actions = [
