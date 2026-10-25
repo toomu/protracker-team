@@ -134,6 +134,7 @@
   .card-list { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
   li.task { display: flex; align-items: center; gap: 12px; padding: 6px 8px 6px 14px; border-top: 1px solid var(--line); min-height: 60px; }
   li.task:first-child { border-top: 0; }
+  li.task.sub { padding-left: calc(14px + var(--depth) * 28px); border-top-style: dashed; }
   .check {
     flex: none; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--muted);
     background: transparent; cursor: pointer; display: grid; place-items: center; padding: 0;
@@ -1148,16 +1149,54 @@
     $("notice").hidden = false;
     noticeTimer = setTimeout(() => { $("notice").hidden = true; }, 5000);
   }
+  // A move takes the task's open subtasks (children, their children…) along; finished ones stay where they are.
+  function openBranch(t) {
+    const out = [t], seen = new Set([t.id]);
+    for (let k = 0; k < out.length; k++) {
+      tasks.forEach(c => { if (c.parentId === out[k].id && !seen.has(c.id) && !c.done) { seen.add(c.id); out.push(c); } });
+    }
+    return out;
+  }
+  const moveBranch = (t, patch) => store.updateMany(openBranch(t).map(x => [x.id, patch]));
   function moveToHour(t) {
-    if (hourFull()) {
-      notice(`The current hour is full (${CAPACITY} tasks). Finish one, or move one to the Backlog, to make room.`);
+    const adding = openBranch(t).filter(x => !inHour(x)).length;
+    if (hourFull() || hourTasks().length + adding > CAPACITY) {
+      const left = Math.max(0, CAPACITY - hourTasks().length);
+      notice(hourFull() ? `The current hour is full (${CAPACITY} tasks). Finish one, or move one to the Backlog, to make room.`
+        : `This task and its subtasks need ${adding} slots, but the current hour has ${left} left. Finish or move some to make room.`);
       return;
     }
-    store.update(t.id, { hourStart: curHour, hourAddedAt: Date.now(), inRepo: false, stagedAt: null });
+    const now = Date.now();
+    store.updateMany(openBranch(t).map((x, k) => [x.id, inHour(x) ? { inRepo: false, stagedAt: null }
+      : { hourStart: curHour, hourAddedAt: now + k, inRepo: false, stagedAt: null }]));
   }
-  const moveToBacklog = (t) => store.update(t.id, { hourStart: null, inRepo: false, stagedAt: null });
-  const moveToRepo = (t) => store.update(t.id, { hourStart: null, inRepo: true, stagedAt: null });
-  const moveToStage = (t) => store.update(t.id, { hourStart: null, inRepo: false, stagedAt: Date.now() });
+  const moveToBacklog = (t) => moveBranch(t, { hourStart: null, inRepo: false, stagedAt: null });
+  const moveToRepo = (t) => moveBranch(t, { hourStart: null, inRepo: true, stagedAt: null });
+  const moveToStage = (t) => moveBranch(t, { hourStart: null, inRepo: false, stagedAt: Date.now() });
+
+  // Lists show subtasks right under their parent: [task, depth] pairs. A task hangs under its nearest ancestor
+  // in the same list (like the Tree); the others keep the list's own order, subtasks the Tree's order.
+  function nestList(list) {
+    const inList = new Map(list.map(t => [t.id, t])), byId = new Map(tasks.map(t => [t.id, t]));
+    const kids = new Map(), roots = [];
+    list.forEach(t => {
+      let p = t.parentId;
+      const seen = new Set([t.id]);
+      while (p && !inList.has(p) && byId.has(p) && !seen.has(p)) { seen.add(p); p = byId.get(p).parentId; }
+      if (p && inList.has(p) && !seen.has(p)) { if (!kids.has(p)) kids.set(p, []); kids.get(p).push(t); } else roots.push(t);
+    });
+    const treeOrder = (a, b) => (a.order ?? a.createdAt ?? 0) - (b.order ?? b.createdAt ?? 0);
+    const out = [], placed = new Set();
+    const walk = (t, d) => {
+      if (placed.has(t.id)) return;
+      placed.add(t.id);
+      out.push([t, d]);
+      (kids.get(t.id) || []).sort(treeOrder).forEach(c => walk(c, d + 1));
+    };
+    roots.forEach(t => walk(t, 0));
+    list.forEach(t => walk(t, 0));   // anything caught in a parent loop
+    return out;
+  }
 
   function addTask(text, toHour) {
     const { title, tags, names, priority } = parseEntry(text);
@@ -1484,9 +1523,9 @@
       return;
     }
     // Highest priority first; equal priorities in the order they were added to the hour.
-    [...list].sort(byPrio).forEach(t => ul.append(taskRow(t, [
+    nestList([...list].sort(byPrio)).forEach(([t, d]) => ul.append(subRow(taskRow(t, [
       { label: "To Backlog", quiet: true, run: moveToStage, aria: "Move to Backlog" },
-    ])));
+    ]), d)));
   }
 
   function tickTimer() {
@@ -1576,7 +1615,7 @@
       return;
     }
     const full = hourFull();
-    visible.forEach(t => {
+    nestList(visible).forEach(([t, d]) => {
       let actions, meta = "";
       if (sub === "repo") {
         actions = [
@@ -1599,8 +1638,13 @@
           { label: "To Repo", quiet: true, run: moveToRepo },
         ];
       }
-      ul.append(taskRow(t, actions, meta));
+      ul.append(subRow(taskRow(t, actions, meta), d));
     });
+  }
+  // Indents a list row that sits under its parent.
+  function subRow(li, depth) {
+    if (depth) { li.classList.add("sub"); li.style.setProperty("--depth", Math.min(depth, 4)); }
+    return li;
   }
 
   function syncComposer() {
