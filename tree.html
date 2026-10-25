@@ -1481,9 +1481,8 @@
     });
     tagsOf(t).forEach(tag => {
       const c = chip(tag);
-      c.setAttribute("aria-pressed", String(tag === tagFilter));
-      c.setAttribute("aria-label", `Show only #${tag} tasks in this list`);
-      c.onclick = () => setTagFilter(tag);
+      c.setAttribute("aria-label", `Show the #${tag} tree`);
+      c.onclick = () => openTreeTag(tag);
       box.append(c);
     });
     const edit = document.createElement("button");
@@ -2168,6 +2167,15 @@
   let treeCat = (() => { try { return localStorage.getItem(TREE_CAT_KEY) || ""; } catch { return ""; } })();
   let curCat = null, editingCats = false, catRemoveArmed = null;
   let tagPanelOpen = false, tagDeleteArmed = null;   // the Edit tags panel (rename, delete, add)
+  // Shows a tag's tree (tag chips on tasks and Tree rows): leaves a category that doesn't hold the tag, closes the editors.
+  function openTreeTag(tag) {
+    const cat = tagCats.find(c => c.id === treeCat);
+    if (cat && !cat.tags.includes(tag)) { treeCat = ""; try { localStorage.setItem(TREE_CAT_KEY, ""); } catch {} }
+    treeTag = tag;
+    try { localStorage.setItem(TREE_TAG_KEY, tag); } catch {}
+    editingCats = false; tagPanelOpen = false;
+    if (view === "tree") renderTree(); else selectView("tree");
+  }
   function cleanCats(list) {
     return Array.isArray(list) ? list.filter(c => c && typeof c.id === "string" && typeof c.name === "string")
       .map(c => ({ id: c.id, name: c.name.trim().slice(0, 40) || "Category", tags: Array.isArray(c.tags) ? [...new Set(c.tags.map(normTag).filter(Boolean))] : [] })) : [];
@@ -2591,12 +2599,7 @@
       otherTags.forEach(tag => {
         const c = chip(tag);
         c.setAttribute("aria-label", `Show the #${tag} tree`);
-        c.onclick = () => {
-          if (curCat && !curCat.tags.includes(tag)) { treeCat = ""; try { localStorage.setItem(TREE_CAT_KEY, ""); } catch {} }
-          treeTag = tag;
-          try { localStorage.setItem(TREE_TAG_KEY, tag); } catch {}
-          renderTree();
-        };
+        c.onclick = () => openTreeTag(tag);
         row.append(c);
       });
       li.querySelector(".node-body").append(row);
