@@ -3925,12 +3925,14 @@
   // except on a desktop (mouse or trackpad), which always opens with the add area showing the typing box.
   const MODE_KEY = "protracker.entryMode";
   const isDesktop = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
-  // Elsewhere the add-tasks area starts hidden on every open, so the list of tasks gets the screen.
-  let showAdd = isDesktop;
-  // Split screen is remembered per device and only offered on wide screens (iPad, desktop).
-  const SPLIT_KEY = "protracker.split";
+  // Split screen is only offered on wide screens (iPad, desktop). It's on unless turned off on this device (remembered;
+  // a new key since Oct 25 2026, when it became the default, so earlier choices start over).
+  const SPLIT_KEY = "protracker.splitView";
   const wideQuery = window.matchMedia("(min-width: 900px)");
-  let splitOn = (() => { try { return localStorage.getItem(SPLIT_KEY) === "1"; } catch { return false; } })();
+  let splitOn = (() => { try { return localStorage.getItem(SPLIT_KEY) !== "0"; } catch { return true; } })();
+  // The add-tasks area opens with split screen (it is the left pane). Elsewhere it starts hidden on every open
+  // (except on a desktop), so the list of tasks gets the screen.
+  let showAdd = isDesktop || (wideQuery.matches && splitOn);
   wideQuery.addEventListener("change", () => applyMode());
   $("split-toggle").addEventListener("click", () => {
     splitOn = !splitOn;
