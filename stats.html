@@ -1139,6 +1139,7 @@
   // ---- Actions ----
   function toggleDone(t) {
     const done = !t.done;
+    if (t.assignedId) { store.update(t.id, { done, completedAt: done ? Date.now() : null, aDone: done }); tickRemote(t.assignedId, done); return; }
     store.update(t.id, { done, completedAt: done ? Date.now() : null });
   }
   // A full hour leaves To Hour tappable (aria-disabled, dimmed) so a tap can say why nothing moved.
@@ -1286,6 +1287,7 @@
       e.preventDefault();
       window.open(a.href, "_blank", "noopener");
     };
+    if (t.assignedId) { title.contentEditable = "false"; title.title = "Assigned to you: the person who assigned it sets the title"; return; }
     title.onblur = () => {
       const v = title.innerText.trim();
       if (!v) { showTitle(title, t.title); return; }
@@ -1304,6 +1306,7 @@
 
   // Deleting a task keeps its subtasks: they move up to the deleted task's parent.
   function deleteTask(t) {
+    if (t.assignedId) { notice(`${fromName({ assigned_by: t.aBy, assigned_by_name: t.aByName }) || "Someone"} assigned this task, so only they can remove it. Tick it off or move it to the Repo instead.`); return; }
     const base = typeof t.order === "number" ? t.order : (t.createdAt || 0);
     const list = tasks.filter(c => c.parentId === t.id).sort((a, b) => (a.order ?? a.createdAt ?? 0) - (b.order ?? b.createdAt ?? 0));
     // Ordered just after the deleted task's spot, so they take its place.
@@ -1471,6 +1474,7 @@
       return;
     }
     box.append(priorityControl(t));
+    if (t.assignedId) box.append(fromLabel(t));
     peopleOf(t).forEach(id => {
       const p = personById(id);
       const c = personChip(p);
@@ -1857,6 +1861,7 @@
         setStatus(Object.keys(pending).length && navigator.onLine === false ? offlineMsg : "");
         show();
         if (firstLoad) pullTeam();
+        syncMirrors();
         flushSoon(0);
       } catch (e) {
         setStatus(navigator.onLine === false || docs.size ? offlineMsg : `Couldn't load your tasks (${(e && e.message) || "error"}). Reload to try again.`, !(navigator.onLine === false || docs.size));
@@ -1890,6 +1895,8 @@
         keep(PENDING, pending); show(); flushSoon();
       },
       remove(id) { put(id, null); },
+      // Whole documents under ids chosen by the caller (assigned tasks' copies); null deletes.
+      setMany(entries) { entries.forEach(([id, data]) => { pending[id] = data; }); keep(PENDING, pending); show(); flushSoon(); },
       pendingCount: () => Object.keys(pending).length,
       ready: () => loaded,
     };
@@ -2586,9 +2593,10 @@
     }
     // People open in the People view; a tag opens its own tree (leaving a category that doesn't hold it).
     const otherTags = tagsOf(t).filter(tag => tag !== curTreeTag && tag !== n.groupTag);
-    if (peopleOf(t).length || otherTags.length) {
+    if (peopleOf(t).length || otherTags.length || t.assignedId) {
       const row = document.createElement("div");
       row.className = "node-chips";
+      if (t.assignedId) row.append(fromLabel(t));
       peopleOf(t).forEach(id => {
         const p = personById(id);
         const c = personChip(p);
@@ -4195,19 +4203,28 @@
     if (loadingA) return;
     loadingA = true;
     try {
-      const { data, error } = await sb.from("team_tasks").select("id, source_id, title, tags, done, completed_at, sort, created_at, assigned_by, assigned_by_name")
+      const { data, error } = await sb.from("team_tasks").select("id, source_id, title, tags, done, completed_at, sort, created_at, assigned_by, assigned_by_name, parent_id")
         .eq("assignee_email", me.email).not("source_id", "is", null).or("created_by.is.null,created_by.neq." + me.id);
       if (error) return;
       writeJSON(aCacheKey(), data || []);
       assigned = withTicks(data || []);
+      assignedFresh = true;
+      syncMirrors();
       render();
       flushTicks();
     } finally { loadingA = false; }
   }
+  // Saves a tick on an assigned task to team_tasks (queued on the device until it's sent).
+  function tickRemote(rid, done) {
+    const patch = { done, completed_at: done ? new Date().toISOString() : null };
+    assigned = assigned.map(x => x.id === rid ? { ...x, ...patch } : x);
+    writeJSON(tickKey(), [...readJSON(tickKey(), []).filter(o => o.id !== rid), { id: rid, patch }]);
+    flushTicks();
+  }
   function tickAssigned(r, quiet) {
-    const patch = { done: !r.done, completed_at: r.done ? null : new Date().toISOString() };
-    assigned = assigned.map(x => x.id === r.id ? { ...x, ...patch } : x);
-    writeJSON(tickKey(), [...readJSON(tickKey(), []).filter(o => o.id !== r.id), { id: r.id, patch }]);
+    const patch = { done: !r.done };
+    tickRemote(r.id, patch.done);
+    syncMirrors();
     render();
     buzz();
     flushTicks();
@@ -4233,6 +4250,59 @@
       if (/^Offline\. Your ticks/.test(statusEl.textContent)) setStatus("");
     } finally { flushingTicks = false; }
   }
+  // Tasks others assigned you are also kept among your own tasks, as copies with the id "as_<team_tasks id>", so
+  // they show in the hour, Stage, Backlog, Repo, Tree, Search and Stats and can be moved and arranged like any task.
+  // New copies start in the Repo, under their assigned parent if you have it too. The assigner's title and tags
+  // win when they change (tags you added stay); ticks go both ways (aDone = the last tick seen from team_tasks).
+  // When the assigner takes a task back, its copy goes.
+  let assignedFresh = false;   // assigned has been loaded from the server this session (not just the cache)
+  const mirrorId = (rid) => "as_" + rid;
+  function syncMirrors() {
+    if (!store || !store.setMany || !store.ready() || !me) return;
+    const byId = new Map(tasks.map(t => [t.id, t])), rows = new Set(assigned.map(r => r.id));
+    const writes = [];
+    assigned.forEach(r => {
+      const id = mirrorId(r.id), m = byId.get(id);
+      const aTags = parseTagList((r.tags || []).join(" ")), done = !!r.done;
+      const completedAt = done ? (Date.parse(r.completed_at || "") || Date.now()) : null;
+      const from = { aBy: r.assigned_by || "", aByName: r.assigned_by_name || "" };
+      if (!m) {
+        const t = newTask({ title: String(r.title || ""), tags: aTags, parentId: r.parent_id && rows.has(r.parent_id) ? mirrorId(r.parent_id) : null });
+        writes.push([id, { ...t, done, completedAt, createdAt: Date.parse(r.created_at || "") || t.createdAt,
+          order: typeof r.sort === "number" ? r.sort : t.order, assignedId: r.id, aTitle: t.title, aTags, aDone: done, ...from }]);
+        return;
+      }
+      const patch = {};
+      if (r.title !== m.aTitle) Object.assign(patch, { title: String(r.title || ""), aTitle: r.title });
+      const old = Array.isArray(m.aTags) ? m.aTags : [];
+      if (aTags.join(" ") !== old.join(" ")) {
+        patch.tags = [...new Set([...tagsOf(m).filter(x => !old.includes(x)), ...aTags])].slice(0, 8);
+        patch.aTags = aTags;
+      }
+      if (done !== !!m.aDone) {
+        patch.aDone = done;
+        if (done !== !!m.done) Object.assign(patch, { done, completedAt });
+      }
+      if (from.aBy !== m.aBy || from.aByName !== m.aByName) Object.assign(patch, from);
+      if (Object.keys(patch).length) { const { id: _, ...doc } = m; writes.push([id, { ...doc, ...patch }]); }
+    });
+    const gone = assignedFresh ? tasks.filter(t => t.assignedId && !rows.has(t.assignedId)) : [];
+    const goneIds = new Set(gone.map(t => t.id));
+    gone.forEach(t => {
+      // Taken back: the copy goes; your subtasks under it move up into its place.
+      tasks.filter(c => c.parentId === t.id && !goneIds.has(c.id)).forEach(c => { const { id: cid, ...doc } = c; writes.push([cid, { ...doc, parentId: t.parentId || null }]); });
+      writes.push([t.id, null]);
+    });
+    if (writes.length) store.setMany(writes);
+  }
+  // "From goutham" on an assigned task's row.
+  function fromLabel(t) {
+    const name = fromName({ assigned_by: t.aBy, assigned_by_name: t.aByName });
+    const s = Object.assign(document.createElement("span"), { className: "place hour", textContent: name ? "From " + name : "Assigned" });
+    if (t.aBy) s.title = "Assigned by " + t.aBy;
+    return s;
+  }
+
   // The old team app's offline queue (same address, same sign-in): ticks still waiting are sent from here, and
   // tasks added offline become this person's own tasks.
   function replayTeamAppQueue() {
@@ -4338,7 +4408,7 @@
     // Simple: assigned and own tasks together. Full: only the assigned ones (own tasks live in the other views).
     const items = assigned.map(r => ({ kind: "assigned", t: r, key: r.sort, at: Date.parse(r.completed_at || "") || 0 }));
     // Simple shows all their own tasks wherever they are (new ones start in the Repo).
-    if (memberMode === "simple") tasks.forEach(t => items.push({ kind: "own", t, key: 1e9 - (t.createdAt || 0), at: t.completedAt || 0 }));
+    if (memberMode === "simple") tasks.filter(t => !t.assignedId).forEach(t => items.push({ kind: "own", t, key: 1e9 - (t.createdAt || 0), at: t.completedAt || 0 }));
     const counts = new Map();
     items.forEach(i => tagsOf(i.t).forEach(tag => counts.set(tag, (counts.get(tag) || 0) + 1)));
     if (aTag && !counts.has(aTag)) aTag = null;
