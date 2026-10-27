@@ -166,6 +166,9 @@
     border-radius: 10px; cursor: pointer; display: grid; place-items: center;
   }
   .del:hover { color: var(--danger); background: var(--paper); }
+  .del.sub-btn:hover { color: var(--accent); }
+  li.sub-entry { list-style: none; display: flex; padding: 4px 8px 4px calc(56px + var(--depth) * 28px); border-top: 1px dashed var(--line); background: var(--accent-soft); }
+  li.sub-entry .tree-input { text-align: left; }
   .del svg { width: 18px; height: 18px; }
   .empty { text-align: center; color: var(--muted); padding: 28px 20px; display: grid; gap: 4px; }
   .empty strong { color: var(--ink); font-family: var(--font-display); font-size: 1.1rem; font-weight: 600; }
@@ -1221,7 +1224,7 @@
     renderPublish();
   }
 
-  function taskRow(t, actions, meta) {
+  function taskRow(t, actions, meta, canSub) {
     const li = document.createElement("li");
     li.className = "task" + (t.done ? " done" : "");
     li.innerHTML = `<button class="check" type="button" aria-label="${t.done ? "Mark as not done" : "Mark as done"}">${CHECK}</button>
@@ -1252,8 +1255,79 @@
       b.onclick = () => a.run(t);
       box.append(b);
     });
+    if (canSub && !t.done) {
+      const plus = document.createElement("button");
+      plus.type = "button";
+      plus.className = "del sub-btn";
+      plus.innerHTML = PLUS;
+      plus.setAttribute("aria-label", `Add a subtask under “${t.title}”`);
+      plus.setAttribute("aria-pressed", String(listSubUnder === t.id));
+      plus.onclick = () => { listSubUnder = listSubUnder === t.id ? null : t.id; listSubDraft = ""; render(); };
+      li.querySelector(".del").before(plus);
+    }
     bindTitle(title, t);
     return li;
+  }
+
+  // Subtasks from the Tasks lists: the + on a row opens a box under that task (after its subtasks already shown).
+  // A new subtask goes where its parent is (this hour, Stage, Backlog or Repo). Return adds and keeps the box open.
+  let listSubUnder = null, listSubDraft = "";
+  function appendNested(ul, pairs, rowFor) {
+    const i = pairs.findIndex(([t]) => t.id === listSubUnder);
+    let at = -1;
+    if (i >= 0) { at = i + 1; while (at < pairs.length && pairs[at][1] > pairs[i][1]) at++; }
+    pairs.forEach(([t, d], k) => {
+      if (k === at) ul.append(listSubRow(pairs[i]));
+      ul.append(subRow(rowFor(t), d));
+    });
+    if (at === pairs.length) ul.append(listSubRow(pairs[i]));
+    const inp = ul.querySelector(".list-sub-input");
+    if (inp) inp.focus();
+  }
+  function listSubRow([parent, depth]) {
+    const li = document.createElement("li");
+    li.className = "sub-entry";
+    li.style.setProperty("--depth", Math.min(depth + 1, 4));
+    const inp = document.createElement("input");
+    inp.className = "tree-input list-sub-input";
+    inp.type = "text";
+    inp.maxLength = 1000;
+    inp.value = listSubDraft;
+    inp.placeholder = "Subtask, then Return. Esc to stop.";
+    inp.setAttribute("aria-label", `New subtask under “${parent.title}”`);
+    inp.setAttribute("enterkeyhint", "done");
+    let closed = false;
+    const close = () => { if (closed) return; closed = true; listSubUnder = null; listSubDraft = ""; render(); };
+    inp.oninput = () => { listSubDraft = inp.value; };
+    inp.onkeydown = (e) => {
+      if (e.isComposing) return;
+      if (e.key === "Escape") { e.preventDefault(); close(); }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (!inp.value.trim()) { close(); return; }
+        // Cleared first: adding re-renders the list, and the new box starts from the draft.
+        const v = inp.value;
+        listSubDraft = "";
+        inp.value = "";
+        if (!addSubtask(parent, v)) { listSubDraft = v; inp.value = v; }
+      }
+    };
+    // Re-renders replace this row; only a real blur (focus moved elsewhere) closes it, and only when empty.
+    inp.onblur = () => setTimeout(() => { if (!closed && li.isConnected && document.activeElement !== inp && !inp.value.trim()) close(); }, 0);
+    li.append(inp);
+    return li;
+  }
+  function addSubtask(parent, text) {
+    const { title, tags, names, priority } = parseEntry(text);
+    if (!title || !store) return false;
+    if (inHour(parent) && hourFull()) {
+      notice(`The current hour is full (${CAPACITY} tasks). Finish one, or move one to the Backlog, to make room.`);
+      return false;
+    }
+    // Same place as the parent: copying its place fields puts the subtask in the same list.
+    const at = { hourStart: parent.hourStart ?? null, hourAddedAt: Date.now(), inRepo: !!parent.inRepo, stagedAt: parent.stagedAt || null };
+    store.add({ title, tags, people: idsFor(names), parentId: parent.id, priority, at });
+    return true;
   }
 
   // Web addresses in a title show as links. The title is also the edit box, where a browser won't follow
@@ -1526,9 +1600,9 @@
       return;
     }
     // Highest priority first; equal priorities in the order they were added to the hour.
-    nestList([...list].sort(byPrio)).forEach(([t, d]) => ul.append(subRow(taskRow(t, [
+    appendNested(ul, nestList([...list].sort(byPrio)), (t) => taskRow(t, [
       { label: "To Backlog", quiet: true, run: moveToStage, aria: "Move to Backlog" },
-    ]), d)));
+    ], "", true));
   }
 
   function tickTimer() {
@@ -1618,7 +1692,7 @@
       return;
     }
     const full = hourFull();
-    nestList(visible).forEach(([t, d]) => {
+    appendNested(ul, nestList(visible), (t) => {
       let actions, meta = "";
       if (sub === "repo") {
         actions = [
@@ -1642,7 +1716,7 @@
           { label: "To Repo", quiet: true, run: moveToRepo },
         ];
       }
-      ul.append(subRow(taskRow(t, actions, meta), d));
+      return taskRow(t, actions, meta, sub !== "done");
     });
   }
   // Indents a list row that sits under its parent.
@@ -1739,11 +1813,11 @@
   }
 
   // ---- Stores ----
-  function newTask({ title, tags, people, toHour, parentId, priority }) {
+  function newTask({ title, tags, people, toHour, parentId, priority, at }) {
     const now = Date.now();
     return { title, tags, people: people || [], priority: priority || 0, done: false, createdAt: now, completedAt: null,
       hourStart: toHour ? curHour : null, hourAddedAt: toHour ? now : null, inRepo: !toHour,
-      parentId: parentId || null, order: now };
+      parentId: parentId || null, order: now, ...(at || {}) };
   }
 
   // Local store: used when the page runs outside the Claude viewer.
