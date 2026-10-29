@@ -728,7 +728,7 @@
       <div class="hour-card">
         <div class="hour-top">
           <div class="timer">
-            <span class="timer-value" id="timer">60:00</span>
+            <span class="timer-value" id="timer">2:00:00</span>
             <span class="timer-label">left this hour</span>
           </div>
           <div class="progress">
@@ -920,7 +920,7 @@
   const CHECK = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="color:var(--sheet)"><path d="M3 8.5l3.2 3L13 4.5"/></svg>';
   const TRASH = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M8 6V4h4v2M6 6l.8 10h6.4L14 6"/></svg>';
   const CAPACITY = 25;
-  const HOUR_MS = 60 * 60 * 1000;
+  const HOUR_MS = 2 * 60 * 60 * 1000;   // the "hour" is a two-hour block (since Oct 30 2026): 12–2, 2–4, … local time
 
 
   // Task: {id, title, tags[], people[], done, createdAt, completedAt|null, hourStart|null, hourAddedAt, inRepo, stagedAt|null, parentId|null, order}
@@ -954,12 +954,15 @@
   let tagDraft = null;     // {tags, people} for that task while the picker is open
   let curHour = hourStartOf(Date.now());
 
-  function hourStartOf(ms) { const d = new Date(ms); d.setMinutes(0, 0, 0); return d.getTime(); }
+  // Start of the two-hour block holding ms (an even local hour). Tasks saved before Oct 30 2026 may carry an odd
+  // hourStart; slotOf maps them onto their block too.
+  function hourStartOf(ms) { const d = new Date(ms); d.setHours(d.getHours() - d.getHours() % 2, 0, 0, 0); return d.getTime(); }
+  const slotOf = (t) => t.hourStart == null ? null : hourStartOf(t.hourStart);
   const isRepo = (t) => !!t.inRepo;
   const STICKY_FROM = Date.UTC(2026, 9, 19, 8, 30);   // 2:00 PM IST, Oct 19 2026
-  const inHour = (t) => !isRepo(t) && t.hourStart === curHour;
-  const inStage = (t) => !isRepo(t) && !t.done && t.hourStart !== curHour
-    && (!!t.stagedAt || (t.hourStart >= STICKY_FROM && t.hourStart < curHour));
+  const inHour = (t) => !isRepo(t) && slotOf(t) === curHour;
+  const inStage = (t) => !isRepo(t) && !t.done && slotOf(t) !== curHour
+    && (!!t.stagedAt || (t.hourStart >= STICKY_FROM && slotOf(t) < curHour));
   const inBacklog = (t) => !isRepo(t) && !inHour(t) && !inStage(t);   // open ones; done ones are Finished
   const hourTasks = () => tasks.filter(inHour).sort((a, b) => (a.hourAddedAt || 0) - (b.hourAddedAt || 0));
   const hourFull = () => hourTasks().length >= CAPACITY;
@@ -1607,14 +1610,15 @@
 
   function tickTimer() {
     const left = Math.max(0, curHour + HOUR_MS - Date.now());
-    const s = Math.floor(left / 1000);
-    $("timer").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    const s = Math.floor(left / 1000), pad = (n) => String(n).padStart(2, "0");
+    $("timer").textContent = `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
   }
 
-  // "the 2 PM hour", with the day when it wasn't today ("the Mon, 19 Oct, 2 PM hour").
+  // "the 2 PM – 4 PM hours", with the day when it wasn't today ("the Mon, 19 Oct, 2 PM – 4 PM hours").
   function hourName(ms) {
+    ms = hourStartOf(ms);
     const d = new Date(ms), today = new Date(curHour).toDateString() === d.toDateString();
-    return "the " + (today ? "" : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + ", ") + fmtClock(ms) + " hour";
+    return "the " + (today ? "" : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + ", ") + fmtClock(ms) + " – " + fmtClock(ms + HOUR_MS) + " hours";
   }
 
   function renderBacklog() {
@@ -2209,7 +2213,7 @@
     renderBacklog();
   }));
 
-  // Every second: count down; when the clock hour changes, a new hour starts (the last one's unfinished tasks are in Stage).
+  // Every second: count down; when the two-hour block changes, a new "hour" starts (the last one's unfinished tasks are in Stage).
   setInterval(() => {
     const h = hourStartOf(Date.now());
     if (h !== curHour) {
