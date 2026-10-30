@@ -744,16 +744,16 @@
 
     <section class="section" id="backlog-section" aria-labelledby="backlog-title">
       <div class="section-head">
-        <h2 id="backlog-title">Backlog</h2>
+        <h2 id="backlog-title">Today</h2>
         <div class="seg sort-seg" id="backlog-sort" role="group" aria-label="Sort tasks">
           <button type="button" data-sort="prio" aria-pressed="true">Priority</button>
           <button type="button" data-sort="new" aria-pressed="false">Latest added</button>
           <button type="button" data-sort="old" aria-pressed="false">Oldest added</button>
         </div>
       </div>
-      <p class="hint">New tasks land in the Repo; line them up in Stage. When an hour ends, its unfinished tasks go to the Backlog. Move tasks into the current hour, tick them off, or put them back in the Repo to get them out of the way.</p>
-      <div class="tabs" role="tablist" aria-label="Backlog lists">
-        <button class="tab" role="tab" id="sub-stage" data-sub="stage" aria-selected="true">Backlog</button>
+      <p class="hint">New tasks land in the Repo; line them up in Stage. When an hour ends, its unfinished tasks go to Today. Move tasks into the current hour, tick them off, or put them back in the Repo to get them out of the way.</p>
+      <div class="tabs" role="tablist" aria-label="Today lists">
+        <button class="tab" role="tab" id="sub-stage" data-sub="stage" aria-selected="true">Today</button>
         <button class="tab" role="tab" id="sub-open" data-sub="open" aria-selected="false">Stage</button>
         <button class="tab" role="tab" id="sub-done" data-sub="done" aria-selected="false">Finished</button>
         <button class="tab" role="tab" id="sub-repo" data-sub="repo" aria-selected="false">Repo</button>
@@ -944,7 +944,7 @@
   let routeBoot = true;    // until the address has been read: switching views replaces the address, not adds to history
   let routePop = false;    // going back/forward: follow the address, don't write it
   let memberMode = "";     // hosted app, team members only: "simple" or "full" (see the Team members section)
-  let sub = "stage";       // open | stage | done | repo (starts on "stage", shown as Backlog, since Oct 30 2026)
+  let sub = "stage";       // open | stage | done | repo (starts on "stage", shown as Today (was Backlog), since Oct 30 2026)
   let tagFilter = null;
   // How Backlog and Repo are sorted: prio (highest first, then newest), new (latest added first) or old (oldest first).
   const SORT_KEY = "protracker.backlogSort";
@@ -1169,7 +1169,7 @@
     const adding = openBranch(t).filter(x => !inHour(x)).length;
     if (hourFull() || hourTasks().length + adding > CAPACITY) {
       const left = Math.max(0, CAPACITY - hourTasks().length);
-      notice(hourFull() ? `The current hour is full (${CAPACITY} tasks). Finish one, or move one to the Backlog, to make room.`
+      notice(hourFull() ? `The current hour is full (${CAPACITY} tasks). Finish one, or move one to Today, to make room.`
         : `This task and its subtasks need ${adding} slots, but the current hour has ${left} left. Finish or move some to make room.`);
       return;
     }
@@ -1324,7 +1324,7 @@
     const { title, tags, names, priority } = parseEntry(text);
     if (!title || !store) return false;
     if (inHour(parent) && hourFull()) {
-      notice(`The current hour is full (${CAPACITY} tasks). Finish one, or move one to the Backlog, to make room.`);
+      notice(`The current hour is full (${CAPACITY} tasks). Finish one, or move one to Today, to make room.`);
       return false;
     }
     // Same place as the parent: copying its place fields puts the subtask in the same list.
@@ -1604,7 +1604,7 @@
     }
     // Highest priority first; equal priorities in the order they were added to the hour.
     appendNested(ul, nestList([...list].sort(byPrio)), (t) => taskRow(t, [
-      { label: "To Backlog", quiet: true, run: moveToStage, aria: "Move to Backlog" },
+      { label: "To Today", quiet: true, run: moveToStage, aria: "Move to Today" },
     ], "", true));
   }
 
@@ -1636,7 +1636,7 @@
     $("backlog-sort").hidden = sub === "done";
     $("backlog-sort").querySelectorAll("[data-sort]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.sort === backlogSort)));
     $("sub-open").textContent = `Stage (${open.length})`;
-    $("sub-stage").textContent = `Backlog (${stage.length})`;
+    $("sub-stage").textContent = `Today (${stage.length})`;
     $("sub-done").textContent = `Finished (${finished.length})`;
     $("sub-repo").textContent = `Repo (${repo.length})`;
 
@@ -1684,9 +1684,9 @@
     ul.replaceChildren();
     if (!items.length) {
       ul.append(sub === "done" ? emptyRow("No finished tasks yet", "Tasks you tick off show up here (ones ticked in the current hour, once it ends).")
-        : sub === "stage" ? emptyRow("Backlog is empty", "When an hour ends, its unfinished tasks land here.")
+        : sub === "stage" ? emptyRow("Today is empty", "When an hour ends, its unfinished tasks land here.")
         : sub === "repo" ? emptyRow("Repo is empty", "New tasks land here. Move the ones you're lining up to Stage.")
-        : emptyRow("Stage is empty", "Line tasks up here with To Stage from the Repo or the Backlog."));
+        : emptyRow("Stage is empty", "Line tasks up here with To Stage from the Repo or Today."));
       return;
     }
     if (!visible.length) {
@@ -2465,7 +2465,7 @@
   function placeLabel(t) {
     if (isRepo(t)) return ["Repo", ""];
     if (inHour(t)) return ["This hour", "hour"];
-    if (inStage(t)) return ["Backlog", "stage"];
+    if (inStage(t)) return ["Today", "stage"];
     return null;
   }
 
@@ -3142,7 +3142,7 @@
     }
   });
 
-  const placeOf = (t) => isRepo(t) ? "Repo" : inHour(t) ? "This hour" : inStage(t) ? "Backlog" : "Stage";
+  const placeOf = (t) => isRepo(t) ? "Repo" : inHour(t) ? "This hour" : inStage(t) ? "Today" : "Stage";
   const placeRank = (t) => inHour(t) ? 0 : inStage(t) ? 1 : isRepo(t) ? 3 : 2;
 
   function renderPeople() {
