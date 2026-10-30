@@ -744,7 +744,7 @@
 
     <section class="section" id="backlog-section" aria-labelledby="backlog-title">
       <div class="section-head">
-        <h2 id="backlog-title">Stage</h2>
+        <h2 id="backlog-title">Backlog</h2>
         <div class="seg sort-seg" id="backlog-sort" role="group" aria-label="Sort tasks">
           <button type="button" data-sort="prio" aria-pressed="true">Priority</button>
           <button type="button" data-sort="new" aria-pressed="false">Latest added</button>
@@ -752,9 +752,9 @@
         </div>
       </div>
       <p class="hint">New tasks land in the Repo; line them up in Stage. When an hour ends, its unfinished tasks go to the Backlog. Move tasks into the current hour, tick them off, or put them back in the Repo to get them out of the way.</p>
-      <div class="tabs" role="tablist" aria-label="Stage lists">
-        <button class="tab" role="tab" id="sub-open" data-sub="open" aria-selected="true">Stage</button>
-        <button class="tab" role="tab" id="sub-stage" data-sub="stage" aria-selected="false">Backlog</button>
+      <div class="tabs" role="tablist" aria-label="Backlog lists">
+        <button class="tab" role="tab" id="sub-stage" data-sub="stage" aria-selected="true">Backlog</button>
+        <button class="tab" role="tab" id="sub-open" data-sub="open" aria-selected="false">Stage</button>
         <button class="tab" role="tab" id="sub-done" data-sub="done" aria-selected="false">Finished</button>
         <button class="tab" role="tab" id="sub-repo" data-sub="repo" aria-selected="false">Repo</button>
       </div>
@@ -944,7 +944,7 @@
   let routeBoot = true;    // until the address has been read: switching views replaces the address, not adds to history
   let routePop = false;    // going back/forward: follow the address, don't write it
   let memberMode = "";     // hosted app, team members only: "simple" or "full" (see the Team members section)
-  let sub = "open";        // open | stage | done | repo
+  let sub = "stage";       // open | stage | done | repo (starts on "stage", shown as Backlog, since Oct 30 2026)
   let tagFilter = null;
   // How Backlog and Repo are sorted: prio (highest first, then newest), new (latest added first) or old (oldest first).
   const SORT_KEY = "protracker.backlogSort";
