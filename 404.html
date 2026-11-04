@@ -184,7 +184,7 @@
   body.signed-out .header-controls, body.signed-out .view { display: none !important; }
   /* Team members (hosted app): the Assigned list, swipe to tick or delete, Simple version, notifications */
   body.simple .tabs[aria-label="Views"], body.simple #add-toggle, body.simple #split-toggle, body.simple #mode-toggle,
-  body.simple #search-toggle, body.simple #team-publish { display: none !important; }
+  body.simple #team-publish { display: none !important; }
   #assigned-list li.task { display: block; padding: 0; position: relative; overflow: hidden; touch-action: pan-y; --dx: 0px; }
   #assigned-list .task-inner {
     position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; padding: 6px 8px 6px 14px; min-height: 60px;
@@ -348,6 +348,15 @@
   .search-bar svg { width: 20px; height: 20px; flex: none; }
   .search-bar input { flex: 1; min-width: 0; font: inherit; font-size: 1.05rem; color: var(--ink); background: none; border: 0; padding: 14px 0; }
   .search-bar input:focus { outline: none; }
+  /* Search and the filter toggle sit above the Today / Stage / Finished / Repo lists. */
+  .list-tools { display: flex; gap: 8px; align-items: stretch; }
+  .list-tools .search-bar { flex: 1; min-width: 0; }
+  .list-tools .search-bar input { padding: 11px 0; }
+  .list-tools .icon-toggle { position: relative; height: auto; min-height: 48px; }
+  .filter-count {
+    position: absolute; top: -6px; right: -6px; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 10px;
+    background: var(--accent); color: var(--sheet); font-size: 0.75rem; font-weight: 700; line-height: 20px; text-align: center;
+  }
 
   /* Split screen: add tasks on the left (stays in view while scrolling), hour + lists on the right. */
   .pane-tasks { display: grid; gap: 24px; min-width: 0; }
@@ -652,7 +661,6 @@
         <button type="button" id="mode-type" data-mode="type" aria-pressed="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg><span>Type</span></button>
       </div>
       <a class="publish-btn" id="team-publish" target="_blank" rel="noopener" aria-disabled="true" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4 18-7z"/></svg><span>Publish<span class="long"> to team</span></span></a>
-      <button type="button" class="icon-toggle" id="search-toggle" aria-pressed="false" aria-controls="view-search" title="Search tasks (/)" aria-label="Search tasks"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg></button>
     <div class="tabs" role="tablist" aria-label="Views">
       <button class="tab" role="tab" id="nav-tasks" data-view="tasks" aria-selected="true">Tasks</button>
       <button class="tab" role="tab" id="nav-assigned" data-view="assigned" aria-selected="false" hidden>Assigned</button>
@@ -751,8 +759,16 @@
           <button type="button" data-sort="old" aria-pressed="false">Oldest added</button>
         </div>
       </div>
-      <p class="hint">New tasks land in the Repo; line them up in Stage. When an hour ends, its unfinished tasks go to Today. Move tasks into the current hour, tick them off, or put them back in the Repo to get them out of the way.</p>
-      <div class="tabs" role="tablist" aria-label="Today lists">
+      <div class="list-tools">
+        <div class="search-bar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+          <input id="search-input" type="search" maxlength="200" autocomplete="off" spellcheck="false" enterkeyhint="search" placeholder="Search all tasks, #tags, @people" aria-label="Search all tasks" title="Search all tasks (/)">
+        </div>
+        <button type="button" class="icon-toggle" id="filter-toggle" aria-pressed="false" aria-controls="tag-filter" title="People and tag filters" aria-label="Show people and tag filters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16l-6 8v5l-4 2v-7L4 5z"/></svg><span class="filter-count" id="filter-count" hidden></span></button>
+      </div>
+      <p class="hint" id="search-sub" hidden></p>
+      <p class="hint" id="backlog-hint">New tasks land in the Repo; line them up in Stage. When an hour ends, its unfinished tasks go to Today. Move tasks into the current hour, tick them off, or put them back in the Repo to get them out of the way.</p>
+      <div class="tabs" id="backlog-tabs" role="tablist" aria-label="Today lists">
         <button class="tab" role="tab" id="sub-stage" data-sub="stage" aria-selected="true">Today</button>
         <button class="tab" role="tab" id="sub-open" data-sub="open" aria-selected="false">Stage</button>
         <button class="tab" role="tab" id="sub-done" data-sub="done" aria-selected="false">Finished</button>
@@ -879,19 +895,6 @@
     </section>
   </div>
 
-  <div class="view" id="view-search" hidden>
-    <section class="section" aria-labelledby="search-title">
-      <div class="search-bar">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
-        <input id="search-input" type="search" maxlength="200" autocomplete="off" spellcheck="false" enterkeyhint="search" placeholder="Search tasks, #tags, @people" aria-label="Search tasks">
-      </div>
-      <div class="section-head">
-        <h2 id="search-title">Search</h2>
-        <span class="sub" id="search-sub"></span>
-      </div>
-      <ul class="list card-list" id="search-list" aria-live="polite"></ul>
-    </section>
-  </div>
 
   <div class="view" id="view-stats" hidden>
     <p class="encourage" id="encourage"></p>
@@ -950,6 +953,8 @@
   const SORT_KEY = "protracker.backlogSort";
   let backlogSort = (() => { try { return localStorage.getItem(SORT_KEY) || "prio"; } catch { return "prio"; } })();
   let personFilter = null; // person id
+  const FILTERS_KEY = "protracker.filters";   // "1" = the People and Tags filter rows are shown
+  let filtersOpen = (() => { try { return localStorage.getItem(FILTERS_KEY) === "1"; } catch { return false; } })();
   let editingTags = null;  // id of the task whose tags and people are being edited
   let tagDraft = null;     // {tags, people} for that task while the picker is open
   let curHour = hourStartOf(Date.now());
@@ -1222,7 +1227,6 @@
     if (view === "stats") renderStats();
     if (view === "tree") renderTree();
     if (view === "people") renderPeople();
-    if (view === "search") renderSearch();
     if (sb && me) renderAssigned();
     renderPublish();
   }
@@ -1633,12 +1637,17 @@
     const finished = backlog.filter(t => t.done).sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
     const stage = tasks.filter(inStage).sort(order);
     const repo = tasks.filter(isRepo).sort((a, b) => (a.done - b.done) || order(a, b));
-    $("backlog-sort").hidden = sub === "done";
+    // While the search box has text, the list shows matches from every place instead of the tabs.
+    const searching = !!$("search-input").value.trim();
+    ["backlog-tabs", "backlog-hint"].forEach(id => { $(id).hidden = searching; });
+    $("search-sub").hidden = !searching;
+    $("backlog-sort").hidden = searching || sub === "done";
     $("backlog-sort").querySelectorAll("[data-sort]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.sort === backlogSort)));
     $("sub-open").textContent = `Stage (${open.length})`;
     $("sub-stage").textContent = `Today (${stage.length})`;
     $("sub-done").textContent = `Finished (${finished.length})`;
     $("sub-repo").textContent = `Repo (${repo.length})`;
+    if (searching) { $("tag-filter").hidden = $("filter-toggle").hidden = true; renderSearch(); return; }
 
     const items = sub === "done" ? finished : sub === "repo" ? repo : sub === "stage" ? stage : open;
     const scope = sub === "repo" ? repo : sub === "stage" ? stage : backlog;
@@ -1649,7 +1658,13 @@
 
     const box = $("tag-filter");
     box.replaceChildren();
-    box.hidden = usage.length === 0 && pUsage.length === 0;
+    // The People and Tags rows show only when the filter button is on; its badge counts filters in use.
+    const nFilters = (tagFilter ? 1 : 0) + (personFilter ? 1 : 0);
+    $("filter-toggle").hidden = usage.length === 0 && pUsage.length === 0;
+    $("filter-toggle").setAttribute("aria-pressed", String(filtersOpen));
+    $("filter-count").hidden = !nFilters;
+    $("filter-count").textContent = String(nFilters);
+    box.hidden = !filtersOpen || $("filter-toggle").hidden;
     const filterRow = (label) => {
       const r = document.createElement("div");
       r.className = "filter-row";
@@ -2172,12 +2187,9 @@
     $("view-stats").hidden = v !== "stats";
     $("view-tree").hidden = v !== "tree";
     $("view-people").hidden = v !== "people";
-    $("view-search").hidden = v !== "search";
     $("view-assigned").hidden = v !== "assigned";
-    $("search-toggle").setAttribute("aria-pressed", String(v === "search"));
     document.body.classList.toggle("tree", v === "tree" || v === "people");
     applyMode();
-    if (v === "search") renderSearch();
     if (v === "stats") renderStats();
     if (v === "tree") renderTree();
     if (v === "people") renderPeople();
@@ -3078,9 +3090,8 @@
   let curPerson = (() => { try { return localStorage.getItem(PERSON_KEY); } catch { return null; } })();
   let removeArmed = null;   // id of the person whose Remove was tapped once
   const pickPerson = (id) => { curPerson = id; removeArmed = null; try { localStorage.setItem(PERSON_KEY, id); } catch {} };
-  // ---- Search: every task, open and finished ----
+  // ---- Search: every task, open and finished, from the box above the Tasks view's lists ----
   // Each word must match. Plain words look in the title, tags and people's names; #word only in tags, @word only in names.
-  let searchFrom = "tasks";   // the view to go back to on Escape or a second tap of the search button
   function searchMatches(q) {
     const terms = q.toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) return null;
@@ -3095,11 +3106,10 @@
     });
   }
   function renderSearch() {
-    const ul = $("search-list"), q = $("search-input").value.trim();
+    const ul = $("backlog-list"), q = $("search-input").value.trim();
     ul.replaceChildren();
-    const found = searchMatches(q);
-    $("search-sub").textContent = found ? `${found.length} ${found.length === 1 ? "task" : "tasks"}` : "";
-    if (!found) { ul.append(emptyRow("Search all tasks", "Type words from a title, a #tag or an @person. Finished and Repo tasks are included.")); return; }
+    const found = searchMatches(q) || [];
+    $("search-sub").textContent = `${found.length} ${found.length === 1 ? "task matches" : "tasks match"} across the hour, Today, Stage, Finished and Repo. Clear the box to go back to the lists.`;
     if (!found.length) { ul.append(emptyRow("No matches", `Nothing matches “${q}”.`)); return; }
     const open = found.filter(t => !t.done).sort((a, b) => byPrio(a, b) || placeRank(a) - placeRank(b) || (b.createdAt || 0) - (a.createdAt || 0));
     const done = found.filter(t => t.done).sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
@@ -3122,16 +3132,21 @@
     }
   }
   function openSearch() {
-    if (view !== "search") { searchFrom = view; selectView("search"); }
+    if (view !== "tasks") selectView("tasks");
+    $("search-input").scrollIntoView({ block: "nearest" });
     $("search-input").focus();
     $("search-input").select();
   }
-  $("search-toggle").addEventListener("click", () => { if (view === "search") selectView(searchFrom); else openSearch(); });
-  $("search-input").addEventListener("input", renderSearch);
+  $("search-input").addEventListener("input", renderBacklog);
   $("search-input").addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     e.preventDefault();
-    if ($("search-input").value) { $("search-input").value = ""; renderSearch(); } else selectView(searchFrom);
+    if ($("search-input").value) { $("search-input").value = ""; renderBacklog(); } else $("search-input").blur();
+  });
+  $("filter-toggle").addEventListener("click", () => {
+    filtersOpen = !filtersOpen;
+    try { localStorage.setItem(FILTERS_KEY, filtersOpen ? "1" : "0"); } catch {}
+    renderBacklog();
   });
   // "/" or Cmd/Ctrl+K opens search from anywhere, unless you're typing somewhere.
   document.addEventListener("keydown", (e) => {
