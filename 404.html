@@ -113,6 +113,7 @@
   .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .section-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 1.15rem; margin: 0; }
   .section-head .sub { color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  .section-head .hour-range { flex-basis: 100%; }
 
   /* Current hour */
   .hour-card { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
@@ -731,13 +732,17 @@
     <section class="section" aria-labelledby="hour-title">
       <div class="section-head">
         <h2 id="hour-title">Current hour</h2>
-        <span class="sub" id="hour-range"></span>
+        <div class="seg sort-seg" id="hour-mode" role="group" aria-label="How long the current block lasts">
+          <button type="button" data-hmode="hour" aria-pressed="true" title="A new block every two hours">Hour</button>
+          <button type="button" data-hmode="day" aria-pressed="false" title="One block for the whole day">Day</button>
+        </div>
+        <span class="sub hour-range" id="hour-range"></span>
       </div>
       <div class="hour-card">
         <div class="hour-top">
           <div class="timer">
             <span class="timer-value" id="timer">2:00:00</span>
-            <span class="timer-label">left this hour</span>
+            <span class="timer-label" id="timer-label">left this hour</span>
           </div>
           <div class="progress">
             <div class="progress-bar" role="progressbar" aria-label="Current hour progress" aria-valuemin="0" aria-valuemax="100" id="progress"><div class="progress-fill" id="progress-fill"></div></div>
@@ -924,6 +929,10 @@
   const TRASH = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M8 6V4h4v2M6 6l.8 10h6.4L14 6"/></svg>';
   const CAPACITY = 25;
   const HOUR_MS = 2 * 60 * 60 * 1000;   // the "hour" is a two-hour block (since Oct 30 2026): 12–2, 2–4, … local time
+  // Hour/Day toggle (since Nov 4 2026, synced in the _prefs doc): "hour" = a new block every two hours,
+  // "day" = one block from midnight to midnight. Either way, when the block ends its unfinished tasks go to Today.
+  let hourMode = "hour";
+  const blockEnd = (start) => hourMode === "day" ? new Date(start).setHours(24, 0, 0, 0) : start + HOUR_MS;
 
 
   // Task: {id, title, tags[], people[], done, createdAt, completedAt|null, hourStart|null, hourAddedAt, inRepo, stagedAt|null, parentId|null, order}
@@ -959,9 +968,13 @@
   let tagDraft = null;     // {tags, people} for that task while the picker is open
   let curHour = hourStartOf(Date.now());
 
-  // Start of the two-hour block holding ms (an even local hour). Tasks saved before Oct 30 2026 may carry an odd
-  // hourStart; slotOf maps them onto their block too.
-  function hourStartOf(ms) { const d = new Date(ms); d.setHours(d.getHours() - d.getHours() % 2, 0, 0, 0); return d.getTime(); }
+  // Start of the block holding ms: an even local hour, or midnight in Day mode. Tasks saved before Oct 30 2026
+  // may carry an odd hourStart, and Hour-mode tasks a two-hour one; slotOf maps them onto their block.
+  function hourStartOf(ms) {
+    const d = new Date(ms);
+    d.setHours(hourMode === "day" ? 0 : d.getHours() - d.getHours() % 2, 0, 0, 0);
+    return d.getTime();
+  }
   const slotOf = (t) => t.hourStart == null ? null : hourStartOf(t.hourStart);
   const isRepo = (t) => !!t.inRepo;
   const STICKY_FROM = Date.UTC(2026, 9, 19, 8, 30);   // 2:00 PM IST, Oct 19 2026
@@ -1220,6 +1233,7 @@
 
   // ---- Rendering ----
   function render() {
+    curHour = hourStartOf(Date.now());
     syncTagList();
     renderHour();
     renderBacklog();
@@ -1587,7 +1601,13 @@
     const list = hourTasks();
     const done = list.filter(t => t.done).length;
     const pct = list.length ? Math.round((done / list.length) * 100) : 0;
-    $("hour-range").textContent = `${fmtClock(curHour)} – ${fmtClock(curHour + HOUR_MS)} · ${list.length}/${CAPACITY} slots`;
+    const day = hourMode === "day";
+    $("hour-title").textContent = day ? "Current day" : "Current hour";
+    $("timer-label").textContent = day ? "left today" : "left this hour";
+    $("hour-mode").querySelectorAll("[data-hmode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.hmode === hourMode)));
+    const range = day ? new Date(curHour).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
+      : `${fmtClock(curHour)} – ${fmtClock(blockEnd(curHour))}`;
+    $("hour-range").textContent = `${range} · ${list.length}/${CAPACITY} slots`;
     $("progress-fill").style.width = pct + "%";
     $("progress").setAttribute("aria-valuenow", String(pct));
     $("progress-label").textContent = `${done}/${list.length} done (${pct}%)`;
@@ -1603,7 +1623,7 @@
     const ul = $("hour-list");
     ul.replaceChildren();
     if (!list.length) {
-      ul.append(emptyRow("Nothing planned for this hour", `Tap Add at the top to plan up to ${CAPACITY} tasks, or move some up from Stage.`));
+      ul.append(emptyRow(hourMode === "day" ? "Nothing planned for today" : "Nothing planned for this hour", `Tap Add at the top to plan up to ${CAPACITY} tasks, or move some up from Stage.`));
       return;
     }
     // Highest priority first; equal priorities in the order they were added to the hour.
@@ -1613,15 +1633,17 @@
   }
 
   function tickTimer() {
-    const left = Math.max(0, curHour + HOUR_MS - Date.now());
+    const left = Math.max(0, blockEnd(curHour) - Date.now());
     const s = Math.floor(left / 1000), pad = (n) => String(n).padStart(2, "0");
     $("timer").textContent = `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`;
   }
 
-  // "the 2 PM – 4 PM hours", with the day when it wasn't today ("the Mon, 19 Oct, 2 PM – 4 PM hours").
+  // "the 2 PM – 4 PM hours", with the day when it wasn't today ("the Mon, 19 Oct, 2 PM – 4 PM hours");
+  // in Day mode just the day ("Mon, 19 Oct").
   function hourName(ms) {
     ms = hourStartOf(ms);
     const d = new Date(ms), today = new Date(curHour).toDateString() === d.toDateString();
+    if (hourMode === "day") return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
     return "the " + (today ? "" : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + ", ") + fmtClock(ms) + " – " + fmtClock(ms + HOUR_MS) + " hours";
   }
 
@@ -1841,18 +1863,20 @@
 
   // Local store: used when the page runs outside the Claude viewer.
   function localStore() {
-    const KEY = "protracker.tasks", PEOPLE_KEY = "protracker.people", CATS_KEY = "protracker.tagCats", TAGS_KEY = "protracker.tags";
+    const KEY = "protracker.tasks", PEOPLE_KEY = "protracker.people", CATS_KEY = "protracker.tagCats", TAGS_KEY = "protracker.tags", PREFS_KEY = "protracker.prefs";
     try { tasks = JSON.parse(localStorage.getItem(KEY) || "[]"); } catch { tasks = []; }
     try { people = sortPeople(cleanPeople(JSON.parse(localStorage.getItem(PEOPLE_KEY) || "[]"))); } catch { people = []; }
     try { team = cleanTeam(JSON.parse(localStorage.getItem(TEAM_KEY) || "null")); } catch { team = cleanTeam(null); }
     try { tagCats = cleanCats(JSON.parse(localStorage.getItem(CATS_KEY) || "[]")); } catch { tagCats = []; }
     try { tagList = cleanTagList(JSON.parse(localStorage.getItem(TAGS_KEY) || "[]")); } catch { tagList = []; }
+    try { applyPrefs(JSON.parse(localStorage.getItem(PREFS_KEY) || "null")); } catch { applyPrefs(null); }
     const save = () => { try { localStorage.setItem(KEY, JSON.stringify(tasks)); } catch {} render(); };
     return {
       setPeople(list) { try { localStorage.setItem(PEOPLE_KEY, JSON.stringify(list)); } catch {} render(); },
       setTeam(t) { try { localStorage.setItem(TEAM_KEY, JSON.stringify(t)); } catch {} render(); },
       setCats(list) { try { localStorage.setItem(CATS_KEY, JSON.stringify(list)); } catch {} render(); },
       setTags(list) { try { localStorage.setItem(TAGS_KEY, JSON.stringify(list)); } catch {} render(); },
+      setPrefs(p) { try { localStorage.setItem(PREFS_KEY, JSON.stringify(p)); } catch {} render(); },
       add(entry) { tasks.push({ id: crypto.randomUUID(), ...newTask(entry) }); save(); },
       update(id, patch) { tasks = tasks.map(t => t.id === id ? { ...t, ...patch } : t); save(); },
       updateMany(patches) {
@@ -1867,7 +1891,7 @@
   // Cloud store: each person's tasks live privately under their own user id.
   // The people list is one extra document in the same collection (it has no title, so it's never read as a task).
   // Tag categories are one more such document: "_tagcats" = {list: [{id, name, tags[]}]}; saved tags another, "_tags" = {list}.
-  const PEOPLE_DOC = "_people", CATS_DOC = "_tagcats", TAGS_DOC = "_tags";
+  const PEOPLE_DOC = "_people", CATS_DOC = "_tagcats", TAGS_DOC = "_tags", PREFS_DOC = "_prefs";
   // Both cloud stores keep one document per task plus the people, tags, categories and team-ticks documents.
   function loadDocs(entries) {
     const get = (id) => { const e = entries.find(x => x.id === id); return e ? e.data : null; };
@@ -1877,7 +1901,10 @@
     tagCats = cleanCats(cd ? cd.list : []);
     tagList = cleanTagList(tg ? tg.list : []);
     team = cleanTeam(get(TEAM_DOC));
+    applyPrefs(get(PREFS_DOC));
   }
+  // Synced settings: {hourMode: "hour" | "day"}.
+  function applyPrefs(p) { hourMode = p && p.hourMode === "day" ? "day" : "hour"; }
 
   // Hosted store (protracker.indexhomes.in): the same documents, as rows of public.pt_docs in Supabase
   // (app/schema.sql; each person reads and writes only their own). Changes show at once and are saved in the
@@ -1981,6 +2008,7 @@
       setTeam(t) { put(TEAM_DOC, t); },
       setCats(list) { put(CATS_DOC, { list }); },
       setTags(list) { put(TAGS_DOC, { list }); },
+      setPrefs(p) { put(PREFS_DOC, p); },
       add(entry) { put(newId(), newTask(entry)); },
       update(id, patch) { const cur = current().get(id); if (cur) put(id, { ...cur, ...patch }); },
       updateMany(patches) {
@@ -2016,6 +2044,7 @@
       setTeam(t) { render(); col.doc(TEAM_DOC).set(t).catch(fail); },
       setCats(list) { render(); col.doc(CATS_DOC).set({ list }).catch(fail); },
       setTags(list) { render(); col.doc(TAGS_DOC).set({ list }).catch(fail); },
+      setPrefs(p) { render(); col.doc(PREFS_DOC).set(p).catch(fail); },
       add(entry) { col.add(newTask(entry)).catch(fail); },
       update(id, patch) { col.doc(id).update(patch).catch(fail); },
       // Shown right away so a dropped task doesn't jump back while the writes land.
@@ -2218,6 +2247,15 @@
     personFilter = null;
     document.querySelectorAll("[data-sub]").forEach(x => x.setAttribute("aria-selected", String(x === b)));
     renderBacklog();
+  }));
+  // Switching Hour/Day keeps what's in the current block there: its tasks move to the new block's start.
+  document.querySelectorAll("[data-hmode]").forEach(b => b.addEventListener("click", () => {
+    if (!store || b.dataset.hmode === hourMode) return;
+    const keep = tasks.filter(inHour);
+    hourMode = b.dataset.hmode;
+    curHour = hourStartOf(Date.now());
+    store.setPrefs({ hourMode });   // first, so the cloud stores' re-read of the documents sees the new mode
+    if (keep.length) store.updateMany(keep.map(t => [t.id, { hourStart: curHour }]));
   }));
   document.querySelectorAll("[data-sort]").forEach(b => b.addEventListener("click", () => {
     backlogSort = b.dataset.sort;
