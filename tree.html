@@ -114,6 +114,15 @@
   .section-head h2 { font-family: var(--font-display); font-weight: 600; font-size: 1.15rem; margin: 0; }
   .section-head .sub { color: var(--muted); font-size: 0.9rem; font-variant-numeric: tabular-nums; }
   .section-head .hour-range { flex-basis: 100%; }
+  /* Phones: the Sprint can fold down to its countdown and progress, so Today and its search are closer to the top. */
+  .icon-toggle.sprint-fold { display: none; }
+  @media (max-width: 720px) {
+    #sprint .section-head { align-items: center; }
+    #sprint #hour-mode { margin-left: auto; }
+    .icon-toggle.sprint-fold { display: grid; width: 40px; height: 40px; }
+    .sprint-fold[aria-expanded="false"] svg { transform: rotate(180deg); }
+    #sprint.folded #hour-list, #sprint.folded .slots { display: none; }
+  }
 
   /* Current hour */
   .hour-card { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
@@ -729,9 +738,10 @@
     </section>
 
     <div class="pane-tasks" id="pane-tasks">
-    <section class="section" aria-labelledby="hour-title">
+    <section class="section" id="sprint" aria-labelledby="hour-title">
       <div class="section-head">
         <h2 id="hour-title">Sprint</h2>
+        <button type="button" class="icon-toggle sprint-fold" id="sprint-fold" aria-expanded="true" aria-controls="hour-list" aria-label="Collapse the sprint" title="Collapse the sprint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
         <div class="seg sort-seg" id="hour-mode" role="group" aria-label="How long the current block lasts">
           <button type="button" data-hmode="hour" aria-pressed="true" title="A new sprint every two hours">Hour</button>
           <button type="button" data-hmode="day" aria-pressed="false" title="One sprint for the whole day">Day</button>
@@ -929,6 +939,9 @@
   const TRASH = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h12M8 6V4h4v2M6 6l.8 10h6.4L14 6"/></svg>';
   const CAPACITY = 25;
   const HOUR_MS = 2 * 60 * 60 * 1000;   // the "hour" is a two-hour block (since Oct 30 2026): 12–2, 2–4, … local time
+  // Phones: the Sprint folded to its countdown and progress (remembered per device; "1" = folded).
+  const FOLD_KEY = "protracker.sprintFolded";
+  let sprintFolded = (() => { try { return localStorage.getItem(FOLD_KEY) === "1"; } catch { return false; } })();
   // Hour/Day toggle (since Nov 4 2026, synced in the _prefs doc): "hour" = a new block every two hours,
   // "day" = one block from midnight to midnight. Either way, when the block ends its unfinished tasks go to Today.
   let hourMode = "hour";
@@ -1603,6 +1616,11 @@
     const pct = list.length ? Math.round((done / list.length) * 100) : 0;
     const day = hourMode === "day";
     $("hour-title").textContent = "Sprint";
+    $("sprint").classList.toggle("folded", sprintFolded);
+    $("sprint-fold").setAttribute("aria-expanded", String(!sprintFolded));
+    const foldLabel = sprintFolded ? `Show the sprint's ${list.length} ${list.length === 1 ? "task" : "tasks"}` : "Collapse the sprint";
+    $("sprint-fold").setAttribute("aria-label", foldLabel);
+    $("sprint-fold").title = foldLabel;
     $("timer-label").textContent = day ? "left today" : "left in this sprint";
     $("hour-mode").querySelectorAll("[data-hmode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.hmode === hourMode)));
     const range = day ? new Date(curHour).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
@@ -2248,6 +2266,11 @@
     document.querySelectorAll("[data-sub]").forEach(x => x.setAttribute("aria-selected", String(x === b)));
     renderBacklog();
   }));
+  $("sprint-fold").addEventListener("click", () => {
+    sprintFolded = !sprintFolded;
+    try { localStorage.setItem(FOLD_KEY, sprintFolded ? "1" : "0"); } catch {}
+    renderHour();
+  });
   // Switching Hour/Day keeps what's in the current block there: its tasks move to the new block's start.
   document.querySelectorAll("[data-hmode]").forEach(b => b.addEventListener("click", () => {
     if (!store || b.dataset.hmode === hourMode) return;
