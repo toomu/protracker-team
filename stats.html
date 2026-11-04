@@ -695,7 +695,7 @@
           <textarea id="new-task" rows="1" maxlength="1000" placeholder="Add a task… #tag @name !priority" aria-label="New task" enterkeyhint="done"></textarea>
         </div>
         <div class="composer-actions">
-          <button class="btn btn-ghost" id="add-hour" type="button" disabled>Add to Current Hour</button>
+          <button class="btn btn-ghost" id="add-hour" type="button" disabled>Add to Sprint</button>
           <button class="btn btn-primary" id="add-backlog" type="submit" disabled>Add to Repo</button>
         </div>
       </form>
@@ -707,7 +707,7 @@
           <ul id="review-list"></ul>
           <div class="review-actions">
             <button class="btn btn-ghost" id="review-discard" type="button">Discard</button>
-            <button class="btn btn-ghost" id="review-add" type="button">Add to Current Hour</button>
+            <button class="btn btn-ghost" id="review-add" type="button">Add to Sprint</button>
             <button class="btn btn-primary" id="review-backlog" type="button">Add to Repo</button>
           </div>
         </div>
@@ -731,10 +731,10 @@
     <div class="pane-tasks" id="pane-tasks">
     <section class="section" aria-labelledby="hour-title">
       <div class="section-head">
-        <h2 id="hour-title">Current hour</h2>
+        <h2 id="hour-title">Sprint</h2>
         <div class="seg sort-seg" id="hour-mode" role="group" aria-label="How long the current block lasts">
-          <button type="button" data-hmode="hour" aria-pressed="true" title="A new block every two hours">Hour</button>
-          <button type="button" data-hmode="day" aria-pressed="false" title="One block for the whole day">Day</button>
+          <button type="button" data-hmode="hour" aria-pressed="true" title="A new sprint every two hours">Hour</button>
+          <button type="button" data-hmode="day" aria-pressed="false" title="One sprint for the whole day">Day</button>
         </div>
         <span class="sub hour-range" id="hour-range"></span>
       </div>
@@ -742,10 +742,10 @@
         <div class="hour-top">
           <div class="timer">
             <span class="timer-value" id="timer">2:00:00</span>
-            <span class="timer-label" id="timer-label">left this hour</span>
+            <span class="timer-label" id="timer-label">left in this sprint</span>
           </div>
           <div class="progress">
-            <div class="progress-bar" role="progressbar" aria-label="Current hour progress" aria-valuemin="0" aria-valuemax="100" id="progress"><div class="progress-fill" id="progress-fill"></div></div>
+            <div class="progress-bar" role="progressbar" aria-label="Sprint progress" aria-valuemin="0" aria-valuemax="100" id="progress"><div class="progress-fill" id="progress-fill"></div></div>
             <div class="progress-label" id="progress-label">0/0 done</div>
             <div class="slots" id="slots" aria-hidden="true"></div>
           </div>
@@ -772,7 +772,7 @@
         <button type="button" class="icon-toggle" id="filter-toggle" aria-pressed="false" aria-controls="tag-filter" title="People and tag filters" aria-label="Show people and tag filters"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16l-6 8v5l-4 2v-7L4 5z"/></svg><span class="filter-count" id="filter-count" hidden></span></button>
       </div>
       <p class="hint" id="search-sub" hidden></p>
-      <p class="hint" id="backlog-hint">New tasks land in the Repo; line them up in Stage. When an hour ends, its unfinished tasks go to Today. Move tasks into the current hour, tick them off, or put them back in the Repo to get them out of the way.</p>
+      <p class="hint" id="backlog-hint">New tasks land in the Repo; line them up in Stage. When a sprint ends, its unfinished tasks go to Today. Move tasks into the sprint, tick them off, or put them back in the Repo to get them out of the way.</p>
       <div class="tabs" id="backlog-tabs" role="tablist" aria-label="Today lists">
         <button class="tab" role="tab" id="sub-stage" data-sub="stage" aria-selected="true">Today</button>
         <button class="tab" role="tab" id="sub-open" data-sub="open" aria-selected="false">Stage</button>
@@ -1187,8 +1187,8 @@
     const adding = openBranch(t).filter(x => !inHour(x)).length;
     if (hourFull() || hourTasks().length + adding > CAPACITY) {
       const left = Math.max(0, CAPACITY - hourTasks().length);
-      notice(hourFull() ? `The current hour is full (${CAPACITY} tasks). Finish one, or move one to Today, to make room.`
-        : `This task and its subtasks need ${adding} slots, but the current hour has ${left} left. Finish or move some to make room.`);
+      notice(hourFull() ? `The sprint is full (${CAPACITY} tasks). Finish one, or move one to Today, to make room.`
+        : `This task and its subtasks need ${adding} slots, but the sprint has ${left} left. Finish or move some to make room.`);
       return;
     }
     const now = Date.now();
@@ -1342,7 +1342,7 @@
     const { title, tags, names, priority } = parseEntry(text);
     if (!title || !store) return false;
     if (inHour(parent) && hourFull()) {
-      notice(`The current hour is full (${CAPACITY} tasks). Finish one, or move one to Today, to make room.`);
+      notice(`The sprint is full (${CAPACITY} tasks). Finish one, or move one to Today, to make room.`);
       return false;
     }
     // Same place as the parent: copying its place fields puts the subtask in the same list.
@@ -1602,8 +1602,8 @@
     const done = list.filter(t => t.done).length;
     const pct = list.length ? Math.round((done / list.length) * 100) : 0;
     const day = hourMode === "day";
-    $("hour-title").textContent = day ? "Current day" : "Current hour";
-    $("timer-label").textContent = day ? "left today" : "left this hour";
+    $("hour-title").textContent = "Sprint";
+    $("timer-label").textContent = day ? "left today" : "left in this sprint";
     $("hour-mode").querySelectorAll("[data-hmode]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.hmode === hourMode)));
     const range = day ? new Date(curHour).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
       : `${fmtClock(curHour)} – ${fmtClock(blockEnd(curHour))}`;
@@ -1623,7 +1623,7 @@
     const ul = $("hour-list");
     ul.replaceChildren();
     if (!list.length) {
-      ul.append(emptyRow(hourMode === "day" ? "Nothing planned for today" : "Nothing planned for this hour", `Tap Add at the top to plan up to ${CAPACITY} tasks, or move some up from Stage.`));
+      ul.append(emptyRow(hourMode === "day" ? "Nothing planned for today's sprint" : "Nothing planned for this sprint", `Tap Add at the top to plan up to ${CAPACITY} tasks, or move some up from Stage.`));
       return;
     }
     // Highest priority first; equal priorities in the order they were added to the hour.
@@ -1644,7 +1644,7 @@
     ms = hourStartOf(ms);
     const d = new Date(ms), today = new Date(curHour).toDateString() === d.toDateString();
     if (hourMode === "day") return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
-    return "the " + (today ? "" : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + ", ") + fmtClock(ms) + " – " + fmtClock(ms + HOUR_MS) + " hours";
+    return "the " + (today ? "" : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) + ", ") + fmtClock(ms) + " – " + fmtClock(ms + HOUR_MS) + " sprint";
   }
 
   function renderBacklog() {
@@ -1720,8 +1720,8 @@
     const ul = $("backlog-list");
     ul.replaceChildren();
     if (!items.length) {
-      ul.append(sub === "done" ? emptyRow("No finished tasks yet", "Tasks you tick off show up here (ones ticked in the current hour, once it ends).")
-        : sub === "stage" ? emptyRow("Today is empty", "When an hour ends, its unfinished tasks land here.")
+      ul.append(sub === "done" ? emptyRow("No finished tasks yet", "Tasks you tick off show up here (ones ticked in the sprint, once it ends).")
+        : sub === "stage" ? emptyRow("Today is empty", "When a sprint ends, its unfinished tasks land here.")
         : sub === "repo" ? emptyRow("Repo is empty", "New tasks land here. Move the ones you're lining up to Stage.")
         : emptyRow("Stage is empty", "Line tasks up here with To Stage from the Repo or Today."));
       return;
@@ -1737,12 +1737,12 @@
       let actions, meta = "";
       if (sub === "repo") {
         actions = [
-          { label: "To Hour", run: moveToHour, disabled: full, aria: full ? "Current hour is full" : "Move into the current hour" },
+          { label: "To Sprint", run: moveToHour, disabled: full, aria: full ? "The sprint is full" : "Move into the sprint" },
           { label: "To Stage", quiet: true, run: moveToBacklog },
         ];
       } else if (sub === "stage") {
         actions = [
-          { label: "To Hour", run: moveToHour, disabled: full, aria: full ? "Current hour is full" : "Move into the current hour" },
+          { label: "To Sprint", run: moveToHour, disabled: full, aria: full ? "The sprint is full" : "Move into the sprint" },
           { label: "To Stage", quiet: true, run: moveToBacklog },
           { label: "To Repo", quiet: true, run: moveToRepo },
         ];
@@ -1753,7 +1753,7 @@
         if (t.completedAt) meta = "Finished " + new Date(t.completedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) + ", " + fmtClock(t.completedAt);
       } else {
         actions = [
-          { label: "To Hour", run: moveToHour, disabled: full, aria: full ? "Current hour is full" : "Move into the current hour" },
+          { label: "To Sprint", run: moveToHour, disabled: full, aria: full ? "The sprint is full" : "Move into the sprint" },
           { label: "To Repo", quiet: true, run: moveToRepo },
         ];
       }
@@ -1772,7 +1772,7 @@
     $("add-backlog").disabled = !has;
     $("add-hour").disabled = !has || full;
     $("composer-hint").textContent = full
-      ? `Return adds to the Repo. The current hour is full (${CAPACITY}/${CAPACITY}).`
+      ? `Return adds to the Repo. The sprint is full (${CAPACITY}/${CAPACITY}).`
       : "Return adds to the Repo, Shift+Return starts a new line. #tag tags it, @name assigns it, !0 to !5 sets its priority (5 is highest).";
   }
 
@@ -2514,7 +2514,7 @@
 
   function placeLabel(t) {
     if (isRepo(t)) return ["Repo", ""];
-    if (inHour(t)) return ["This hour", "hour"];
+    if (inHour(t)) return ["Sprint", "hour"];
     if (inStage(t)) return ["Today", "stage"];
     return null;
   }
@@ -2759,8 +2759,8 @@
       b.className = "mini to-hour";
       b.innerHTML = CLOCK;
       if (full) b.setAttribute("aria-disabled", "true");
-      b.title = full ? "Current hour is full" : "To Hour";
-      b.setAttribute("aria-label", full ? "Current hour is full" : `Move “${t.title}” into the current hour`);
+      b.title = full ? "The sprint is full" : "To Sprint";
+      b.setAttribute("aria-label", full ? "The sprint is full" : `Move “${t.title}” into the sprint`);
       b.onclick = () => moveToHour(t);
       li.querySelector(".add-sub").before(b);
     }
@@ -3147,14 +3147,14 @@
     const ul = $("backlog-list"), q = $("search-input").value.trim();
     ul.replaceChildren();
     const found = searchMatches(q) || [];
-    $("search-sub").textContent = `${found.length} ${found.length === 1 ? "task matches" : "tasks match"} across the hour, Today, Stage, Finished and Repo. Clear the box to go back to the lists.`;
+    $("search-sub").textContent = `${found.length} ${found.length === 1 ? "task matches" : "tasks match"} across the sprint, Today, Stage, Finished and Repo. Clear the box to go back to the lists.`;
     if (!found.length) { ul.append(emptyRow("No matches", `Nothing matches “${q}”.`)); return; }
     const open = found.filter(t => !t.done).sort((a, b) => byPrio(a, b) || placeRank(a) - placeRank(b) || (b.createdAt || 0) - (a.createdAt || 0));
     const done = found.filter(t => t.done).sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
     const full = hourFull();
     const row = (t) => {
       const actions = t.done || inHour(t) ? []
-        : [{ label: "To Hour", run: moveToHour, disabled: full, aria: full ? "Current hour is full" : "Move into the current hour" }];
+        : [{ label: "To Sprint", run: moveToHour, disabled: full, aria: full ? "The sprint is full" : "Move into the sprint" }];
       const meta = t.done && t.completedAt
         ? "Finished " + new Date(t.completedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })
         : placeOf(t);
@@ -3195,7 +3195,7 @@
     }
   });
 
-  const placeOf = (t) => isRepo(t) ? "Repo" : inHour(t) ? "This hour" : inStage(t) ? "Today" : "Stage";
+  const placeOf = (t) => isRepo(t) ? "Repo" : inHour(t) ? "Sprint" : inStage(t) ? "Today" : "Stage";
   const placeRank = (t) => inHour(t) ? 0 : inStage(t) ? 1 : isRepo(t) ? 3 : 2;
 
   function renderPeople() {
@@ -3254,7 +3254,7 @@
     const full = hourFull();
     const row = (t) => {
       const actions = t.done || inHour(t) ? []
-        : [{ label: "To Hour", run: moveToHour, disabled: full, aria: full ? "Current hour is full" : "Move into the current hour" }];
+        : [{ label: "To Sprint", run: moveToHour, disabled: full, aria: full ? "The sprint is full" : "Move into the sprint" }];
       const meta = t.done && t.completedAt
         ? "Finished " + new Date(t.completedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })
         : placeOf(t);
@@ -4016,7 +4016,7 @@
       const free = CAPACITY - hourTasks().length;
       $("review-backlog").disabled = n === 0;
       $("review-add").disabled = n === 0 || free <= 0;
-      $("review-add").textContent = free <= 0 ? "Current hour is full" : "Add to Current Hour";
+      $("review-add").textContent = free <= 0 ? "The sprint is full" : "Add to Sprint";
     }
     reviewList.addEventListener("input", updateAddLabel);
     reviewList.addEventListener("change", updateAddLabel);
@@ -4037,8 +4037,8 @@
       strokes = []; redraw(); syncButtons();
       const n = items.length, plural = (k) => k === 1 ? "1 task" : `${k} tasks`;
       if (!toHour) { setMsg(`Added ${plural(n)} to the Repo.`); showRepo(); }
-      else if (toHourCount === n) setMsg(`Added ${plural(n)} to the current hour.`);
-      else setMsg(`Added ${plural(toHourCount)} to the current hour. The hour only holds ${CAPACITY}, so ${plural(n - toHourCount)} went to the Repo.`);
+      else if (toHourCount === n) setMsg(`Added ${plural(n)} to the sprint.`);
+      else setMsg(`Added ${plural(toHourCount)} to the sprint. The sprint only holds ${CAPACITY}, so ${plural(n - toHourCount)} went to the Repo.`);
     }
     $("review-add").onclick = () => addReviewed(true);
     $("review-backlog").onclick = () => addReviewed(false);
