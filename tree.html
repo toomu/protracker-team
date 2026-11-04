@@ -116,9 +116,12 @@
   .section-head .hour-range { flex-basis: 100%; }
   /* Phones: the Sprint can fold down to its countdown and progress, so Today and its search are closer to the top. */
   .icon-toggle.sprint-fold { display: none; }
+  .head-tools { display: flex; gap: 8px; align-items: center; }
+  .icon-toggle.sprint-filter-btn { position: relative; width: 40px; height: 40px; }
+  #sprint.folded #sprint-filter, #sprint.folded .sprint-filter-btn { display: none; }
   @media (max-width: 720px) {
     #sprint .section-head { align-items: center; }
-    #sprint #hour-mode { margin-left: auto; }
+    #sprint .head-tools { margin-left: auto; }
     .icon-toggle.sprint-fold { display: grid; width: 40px; height: 40px; }
     .sprint-fold[aria-expanded="false"] svg { transform: rotate(180deg); }
     #sprint.folded #hour-list, #sprint.folded .slots { display: none; }
@@ -742,12 +745,16 @@
       <div class="section-head">
         <h2 id="hour-title">Sprint</h2>
         <button type="button" class="icon-toggle sprint-fold" id="sprint-fold" aria-expanded="true" aria-controls="hour-list" aria-label="Collapse the sprint" title="Collapse the sprint"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg></button>
-        <div class="seg sort-seg" id="hour-mode" role="group" aria-label="How long the current block lasts">
-          <button type="button" data-hmode="hour" aria-pressed="true" title="A new sprint every two hours">Hour</button>
-          <button type="button" data-hmode="day" aria-pressed="false" title="One sprint for the whole day">Day</button>
+        <div class="head-tools">
+          <button type="button" class="icon-toggle sprint-filter-btn" id="sprint-filter-toggle" aria-pressed="false" aria-controls="sprint-filter" title="Filter the sprint by tag" aria-label="Filter the sprint by tag" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16l-6 8v5l-4 2v-7L4 5z"/></svg><span class="filter-count" id="sprint-filter-count" hidden>1</span></button>
+          <div class="seg sort-seg" id="hour-mode" role="group" aria-label="How long the current block lasts">
+            <button type="button" data-hmode="hour" aria-pressed="true" title="A new sprint every two hours">Hour</button>
+            <button type="button" data-hmode="day" aria-pressed="false" title="One sprint for the whole day">Day</button>
+          </div>
         </div>
         <span class="sub hour-range" id="hour-range"></span>
       </div>
+      <div class="tag-filter" id="sprint-filter" hidden aria-label="Filter the sprint by tag"></div>
       <div class="hour-card">
         <div class="hour-top">
           <div class="timer">
@@ -942,6 +949,10 @@
   // Phones: the Sprint folded to its countdown and progress (remembered per device; "1" = folded).
   const FOLD_KEY = "protracker.sprintFolded";
   let sprintFolded = (() => { try { return localStorage.getItem(FOLD_KEY) === "1"; } catch { return false; } })();
+  // The Sprint's own tag filter: its chip row shows while the funnel by the heading is on (remembered per device).
+  const SPRINT_FILTER_KEY = "protracker.sprintFilter";
+  let sprintFilterOpen = (() => { try { return localStorage.getItem(SPRINT_FILTER_KEY) === "1"; } catch { return false; } })();
+  let sprintTag = null;
   // Hour/Day toggle (since Nov 4 2026, synced in the _prefs doc): "hour" = a new block every two hours,
   // "day" = one block from midnight to midnight. Either way, when the block ends its unfinished tasks go to Today.
   let hourMode = "hour";
@@ -1638,14 +1649,37 @@
     }
     tickTimer();
 
+    const usage = tagUsage(list);
+    if (sprintTag && !usage.some(([tag]) => tag === sprintTag)) sprintTag = null;
+    $("sprint-filter-toggle").hidden = !usage.length;
+    $("sprint-filter-toggle").setAttribute("aria-pressed", String(sprintFilterOpen));
+    $("sprint-filter-count").hidden = !sprintTag;
+    const box = $("sprint-filter");
+    box.replaceChildren();
+    box.hidden = !sprintFilterOpen || !usage.length;
+    if (usage.length) {
+      const row = document.createElement("div");
+      row.className = "filter-row";
+      row.append(Object.assign(document.createElement("span"), { className: "label", textContent: "Tags" }));
+      usage.forEach(([tag, n]) => {
+        const c = chip(tag, String(n));
+        c.setAttribute("aria-pressed", String(tag === sprintTag));
+        c.setAttribute("aria-label", `Show only #${tag} tasks in the sprint (${n})`);
+        c.onclick = () => { sprintTag = tag === sprintTag ? null : tag; renderHour(); };
+        row.append(c);
+      });
+      box.append(row);
+    }
+
     const ul = $("hour-list");
     ul.replaceChildren();
     if (!list.length) {
       ul.append(emptyRow(hourMode === "day" ? "Nothing planned for today's sprint" : "Nothing planned for this sprint", `Tap Add at the top to plan up to ${CAPACITY} tasks, or move some up from Stage.`));
       return;
     }
+    const shown = sprintTag ? list.filter(t => tagsOf(t).includes(sprintTag)) : list;
     // Highest priority first; equal priorities in the order they were added to the hour.
-    appendNested(ul, nestList([...list].sort(byPrio)), (t) => taskRow(t, [
+    appendNested(ul, nestList([...shown].sort(byPrio)), (t) => taskRow(t, [
       { label: "To Today", quiet: true, run: moveToStage, aria: "Move to Today" },
     ], "", true));
   }
@@ -2266,6 +2300,11 @@
     document.querySelectorAll("[data-sub]").forEach(x => x.setAttribute("aria-selected", String(x === b)));
     renderBacklog();
   }));
+  $("sprint-filter-toggle").addEventListener("click", () => {
+    sprintFilterOpen = !sprintFilterOpen;
+    try { localStorage.setItem(SPRINT_FILTER_KEY, sprintFilterOpen ? "1" : "0"); } catch {}
+    renderHour();
+  });
   $("sprint-fold").addEventListener("click", () => {
     sprintFolded = !sprintFolded;
     try { localStorage.setItem(FOLD_KEY, sprintFolded ? "1" : "0"); } catch {}
