@@ -419,6 +419,10 @@
   .suggestions .dot { flex: none; width: 10px; height: 10px; margin-inline: 4px; border-radius: 50%; background: var(--c); }
   .suggestions .av { width: 24px; height: 24px; font-size: 0.7rem; }
   .suggestions .lbl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .suggestions .cal { flex: none; display: inline-flex; margin-inline: 1px; color: var(--muted); }
+  .suggestions .cal svg { width: 16px; height: 16px; }
+  .suggestions button[aria-selected="true"] .cal { color: inherit; }
+  .sug-date { position: absolute; z-index: -1; width: 1px; height: 1px; margin: 0; padding: 0; border: 0; opacity: 0; font-size: 16px; }
   .suggestions .n { color: var(--muted); font-size: 0.8rem; font-weight: 400; font-variant-numeric: tabular-nums; }
 
   /* Writing pad */
@@ -736,7 +740,7 @@
           <button class="btn btn-primary" id="add-backlog" type="submit" disabled>Add to Repo</button>
         </div>
       </form>
-      <p class="hint" id="composer-hint">Return adds to the Repo, Shift+Return starts a new line. #tag tags it, @name assigns it, !0 to !5 sets its priority.</p>
+      <p class="hint" id="composer-hint">Return adds to the Repo, Shift+Return starts a new line. #tag tags it, @name assigns it, ! picks a date, !0 to !5 sets its priority.</p>
       </div>
       <section class="pad" id="pad" hidden aria-label="Writing pad">
         <div class="review" id="review" hidden>
@@ -962,7 +966,7 @@
     <section class="section" aria-labelledby="notes-title">
       <div class="section-head"><h2 id="notes-title">Notes</h2><span class="sub" id="notes-count"></span></div>
       <form class="notes-form" id="notes-form" autocomplete="off">
-        <input id="note-input" type="text" maxlength="500" placeholder="Write a note, then Return" aria-label="New note" enterkeyhint="done">
+        <input id="note-input" type="text" maxlength="500" placeholder="Write a note, ! for a date" aria-label="New note" enterkeyhint="done">
         <span id="note-date"></span>
         <button class="btn btn-primary" type="submit">Add</button>
       </form>
@@ -975,6 +979,7 @@
 <div class="notice" id="notice" role="status" hidden></div>
 <div class="notice toast" id="toast" role="status" hidden><span id="toast-text"></span><button id="toast-undo" type="button">Undo</button></div>
 <ul class="suggestions" id="suggestions" role="listbox" aria-label="Suggestions" hidden></ul>
+<input class="sug-date" id="sug-date" type="date" tabindex="-1" aria-label="Pick a date">
 <script>
 (() => {
   const $ = (id) => document.getElementById(id);
@@ -1056,11 +1061,24 @@
   const PRIO_RE = /(^|\s)!([0-5])(?=\s|$)/g;
   const prioOf = (t) => { const p = Math.round(Number(t.priority)); return p >= 0 && p <= 5 ? p : 0; };
   const byPrio = (a, b) => prioOf(b) - prioOf(a);   // a sort comparator: higher priority first
-  // Pulls #tags, @people and !priority out of a title. keepPeople leaves the @names in the text (the pad's review list).
+  // Date: picking from the ! list puts "!2026-12-25" in the text, which is pulled out on saving, like a #tag.
+  const DATE_RE = /(^|\s)!(\d{4}-\d{2}-\d{2})(?=\s|$)/g;
+  function pullDate(text) {
+    let date = null;
+    const rest = String(text).replace(DATE_RE, (m, sp, iso) => {
+      const [y, mo, d] = iso.split("-").map(Number), real = new Date(y, mo - 1, d);
+      if (real.getMonth() !== mo - 1 || real.getDate() !== d) return m;   // not a real day: leave it as text
+      date = iso;
+      return sp;
+    });
+    return { rest, date };
+  }
+  // Pulls #tags, @people, !priority and a !date out of a title. keepPeople leaves the @names in the text (the pad's review list).
   function parseEntry(text, keepPeople) {
     const tags = [], names = [];
     let priority = null;
-    let title = String(text).replace(PRIO_RE, (m, sp, n) => { priority = Number(n); return sp; }).replace(TAG_RE, (m, sp, tag) => {
+    const { rest, date } = pullDate(text);
+    let title = rest.replace(PRIO_RE, (m, sp, n) => { priority = Number(n); return sp; }).replace(TAG_RE, (m, sp, tag) => {
       const n = normTag(tag);
       if (n && !tags.includes(n)) tags.push(n);
       return sp;
@@ -1068,7 +1086,7 @@
     if (!keepPeople) title = title.replace(PERSON_RE, (m, sp, name) => { names.push(name); return sp; });
     // Line breaks are kept (Shift+Return in the composer); spaces within a line collapse, blank lines go.
     title = title.split(/\r?\n/).map(l => l.replace(/\s+/g, " ").trim()).filter(Boolean).join("\n");
-    return { title: title || String(text).trim(), tags: tags.slice(0, 8), names, priority };
+    return { title: title || String(text).trim(), tags: tags.slice(0, 8), names, priority, date };
   }
   function parseTagList(text) {
     const out = [];
@@ -1287,10 +1305,10 @@
   }
 
   function addTask(text, toHour, date) {
-    const { title, tags, names, priority } = parseEntry(text);
+    const { title, tags, names, priority, date: typed } = parseEntry(text);
     if (!title || !store) return false;
     if (toHour && hourFull()) return false;
-    store.add({ title, tags, people: idsFor(names), toHour, priority, at: date ? { date } : null });
+    store.add({ title, tags, people: idsFor(names), toHour, priority, date: typed || date });
     return true;
   }
 
@@ -1403,7 +1421,7 @@
     return li;
   }
   function addSubtask(parent, text) {
-    const { title, tags, names, priority } = parseEntry(text);
+    const { title, tags, names, priority, date } = parseEntry(text);
     if (!title || !store) return false;
     if (inHour(parent) && hourFull()) {
       notice(`The sprint is full (${CAPACITY} tasks). Finish one, or move one to Today, to make room.`);
@@ -1411,7 +1429,7 @@
     }
     // Same place as the parent: copying its place fields puts the subtask in the same list.
     const at = { hourStart: parent.hourStart ?? null, hourAddedAt: Date.now(), inRepo: !!parent.inRepo, stagedAt: parent.stagedAt || null };
-    store.add({ title, tags, people: idsFor(names), parentId: parent.id, priority, at });
+    store.add({ title, tags, people: idsFor(names), parentId: parent.id, priority, date, at });
     return true;
   }
 
@@ -1459,6 +1477,7 @@
       idsFor(parsed.names).forEach(id => { if (!ids.includes(id)) ids.push(id); });
       const patch = { title: parsed.title, tags: tags.slice(0, 8), people: ids.slice(0, PEOPLE_MAX) };
       if (parsed.priority !== null) patch.priority = parsed.priority;
+      if (parsed.date) patch.date = parsed.date;
       store.update(t.id, patch);
     };
   }
@@ -1904,7 +1923,7 @@
     $("add-hour").disabled = !has || full;
     $("composer-hint").textContent = full
       ? `Return adds to the Repo. The sprint is full (${CAPACITY}/${CAPACITY}).`
-      : "Return adds to the Repo, Shift+Return starts a new line. #tag tags it, @name assigns it, !0 to !5 sets its priority (5 is highest).";
+      : "Return adds to the Repo, Shift+Return starts a new line. #tag tags it, @name assigns it, ! picks a date, !0 to !5 sets its priority (5 is highest).";
   }
 
   // ---- Stats ----
@@ -1985,11 +2004,11 @@
   }
 
   // ---- Stores ----
-  function newTask({ title, tags, people, toHour, parentId, priority, at }) {
+  function newTask({ title, tags, people, toHour, parentId, priority, date, at }) {
     const now = Date.now();
     return { title, tags, people: people || [], priority: priority || 0, done: false, createdAt: now, completedAt: null,
       hourStart: toHour ? curHour : null, hourAddedAt: toHour ? now : null, inRepo: !toHour,
-      parentId: parentId || null, order: now, ...(at || {}) };
+      parentId: parentId || null, order: now, ...(date ? { date } : {}), ...(at || {}) };
   }
 
   // Local store: used when the page runs outside the Claude viewer.
@@ -2194,7 +2213,9 @@
   // Typing # or @ (at the start or after a space, anywhere in the text) opens a list under the box: saved tags by
   // use, or people. Matches by start first, then anywhere in the name. Up/Down move, Return or Tab picks, Esc closes;
   // tapping one picks it. Works in inputs, textareas and the editable task titles (contenteditable).
-  const SUGGEST_IN = "#mine-new, #new-task, #tree-new, #people-task-new, .tree-input, #search-input, .title[contenteditable='true']";
+  // ! opens dates instead (not in Search or the Simple version); !0 to !5 still set priority, since a digit closes the list.
+  // Notes only get the dates: # and @ are plain text there.
+  const SUGGEST_IN = "#mine-new, #new-task, #tree-new, #people-task-new, .tree-input, #search-input, #note-input, .title[contenteditable='true']";
   const sugBox = $("suggestions");
   let sugField = null, suggestions = [], highlighted = 0;
   function textBeforeCaret(el) {
@@ -2211,11 +2232,31 @@
   }
   function activeQuery(el) {
     const before = textBeforeCaret(el);
-    const m = before && before.match(/(?:^|\s)([#@])([\p{L}\p{N}_-]*)$/u);
-    return m ? { sign: m[1], q: m[2].toLowerCase() } : null;
+    const m = before && before.match(/(?:^|\s)([#@!])([\p{L}\p{N}_-]*)$/u);
+    if (!m) return null;
+    const inNotes = el.id === "note-input" || !!el.closest("li.note");
+    if (m[1] === "!" ? el.id === "search-input" || memberMode === "simple" : inNotes) return null;
+    return { sign: m[1], q: m[2].toLowerCase() };
   }
   const rank = (key, q) => key.startsWith(q) ? 0 : key.includes(q) ? 1 : -1;
-  function findSuggestions(a) {
+  // The ! list: the next seven days by name, plus the full picker. An editable title has no picker, because leaving it
+  // saves it, and its row's own date button is right there.
+  function dateSuggestions(a, el) {
+    if (/^\d/.test(a.q)) return [];   // !3 is a priority
+    const now = new Date();
+    const list = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+      const text = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const label = i === 0 ? "Today" : i === 1 ? "Tomorrow" : d.toLocaleDateString(undefined, { weekday: "long" });
+      list.push({ key: label.toLowerCase(), text, label, n: dateText(text), isDate: true });
+    }
+    // Third, so it shows without scrolling the list.
+    if (!el.isContentEditable) list.splice(2, 0, { key: "pick a date", label: "Pick a date…", isDate: true, pick: true });
+    return list.filter(x => rank(x.key, a.q) >= 0).sort((x, y) => rank(x.key, a.q) - rank(y.key, a.q));
+  }
+  function findSuggestions(a, el) {
+    if (a.sign === "!") return dateSuggestions(a, el);
     let list;
     if (a.sign === "#") list = allTagUsage().map(([tag, n]) => ({ key: tag, text: tag, label: "#" + tag, n, tag }));
     else list = sortPeople(people).map(p => ({ key: personKey(p.name), text: handleOf(p), label: p.name, person: p,
@@ -2233,7 +2274,7 @@
   }
   function renderSuggest(el) {
     const a = activeQuery(el);
-    suggestions = a ? findSuggestions(a) : [];
+    suggestions = a ? findSuggestions(a, el) : [];
     if (!suggestions.length) { hideSuggest(); return; }
     sugField = el;
     if (highlighted >= suggestions.length) highlighted = 0;
@@ -2245,7 +2286,8 @@
       b.tabIndex = -1;
       b.setAttribute("role", "option");
       b.setAttribute("aria-selected", String(i === highlighted));
-      if (sg.person) b.append(avatar(sg.person));
+      if (sg.isDate) { const c = document.createElement("span"); c.className = "cal"; c.innerHTML = CALENDAR; b.append(c); }
+      else if (sg.person) b.append(avatar(sg.person));
       else { const d = document.createElement("span"); d.className = "dot"; d.style.setProperty("--c", tagColor(sg.tag)); b.append(d); }
       b.append(Object.assign(document.createElement("span"), { className: "lbl", textContent: sg.label }));
       if (sg.n) b.append(Object.assign(document.createElement("span"), { className: "n", textContent: sg.n }));
@@ -2274,7 +2316,6 @@
     const el = sugField;
     const a = el && activeQuery(el);
     if (!a) { hideSuggest(); return; }
-    const insert = a.sign + sg.text + " ";
     el.focus();
     if (el.isContentEditable) {
       const sel = getSelection();
@@ -2282,13 +2323,49 @@
     } else {
       el.setSelectionRange(el.selectionStart - a.q.length - 1, el.selectionStart);
     }
-    // insertText keeps undo and fires "input"; setRangeText is the fallback for fields that refuse it.
-    if (!document.execCommand("insertText", false, insert) && !el.isContentEditable) {
-      el.setRangeText(insert, el.selectionStart, el.selectionEnd, "end");
-      el.dispatchEvent(new Event("input", { bubbles: true }));
+    // Pick a date: the typed ! goes now, so cancelling the picker leaves nothing behind.
+    if (sg.pick) {
+      if (!document.execCommand("delete") && !el.isContentEditable) {
+        el.setRangeText("", el.selectionStart, el.selectionEnd, "end");
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      hideSuggest();
+      openDatePick(el);
+      return;
     }
+    insertInto(el, a.sign + sg.text + " ");
     hideSuggest();
   }
+  // insertText keeps undo and fires "input"; setRangeText is the fallback for fields that refuse it.
+  function insertInto(el, text) {
+    if (!document.execCommand("insertText", false, text) && !el.isContentEditable) {
+      el.setRangeText(text, el.selectionStart, el.selectionEnd, "end");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }
+  // The full date picker, for a box where ! was typed. Its choice goes in at the caret as !2026-12-25.
+  const sugDate = $("sug-date");
+  let pickField = null;
+  function openDatePick(el) {
+    pickField = el;
+    sugDate.value = "";
+    const r = el.getBoundingClientRect();
+    sugDate.style.left = r.left + scrollX + "px";
+    sugDate.style.top = r.bottom + scrollY + "px";
+    if (appleMobile()) sugDate.focus();   // iOS opens its picker on focus, and needs it for the blur that means Done
+    try { sugDate.showPicker(); } catch { sugDate.focus(); }
+  }
+  function commitDatePick() {
+    const el = pickField, v = sugDate.value;
+    if (!el || !v) return;
+    pickField = null;
+    sugDate.value = "";
+    el.focus();
+    insertInto(el, `!${v} `);
+  }
+  // iOS sends change while its picker is open (even on turning the month), so there it waits for Done, as dateControl does.
+  sugDate.addEventListener("change", () => { if (!appleMobile()) commitDatePick(); });
+  sugDate.addEventListener("blur", commitDatePick);
   const suggestField = (t) => t && t.closest && t.closest(SUGGEST_IN);
   document.addEventListener("input", (e) => { const el = suggestField(e.target); if (el) { highlighted = 0; renderSuggest(el); } });
   // Moving the caret (tap, arrows) re-checks what's being typed at the new spot.
@@ -2980,7 +3057,7 @@
   }
 
   function addTreeTask(text, parentId) {
-    const { title, tags, names, priority } = parseEntry(text);
+    const { title, tags, names, priority, date } = parseEntry(text);
     if (!title || !store) return;
     if (curTreeTag === CAT_ALL) {
       // In a whole category, a subtask takes its parent's tag from the category; a new top task its first tag.
@@ -2989,7 +3066,7 @@
       const tag = fromParent || curCat.tags[0];
       if (tag && !tags.some(x => curCat.tags.includes(x))) tags.unshift(tag);
     } else if (curTreeTag && curTreeTag !== NO_TAG && !tags.includes(curTreeTag)) tags.unshift(curTreeTag);
-    store.add({ title, tags: tags.slice(0, 8), people: idsFor(names), toHour: false, parentId, priority });
+    store.add({ title, tags: tags.slice(0, 8), people: idsFor(names), toHour: false, parentId, priority, date });
   }
   // Each category: a name box, every known tag as a toggle, and Remove (tap twice). Changes save as you go.
   function renderCatEditor() {
@@ -3478,9 +3555,9 @@
     const v = $("people-task-new").value.trim();
     const p = personById(curPerson);
     if (!v || !p || !store) return;
-    const { title, tags, names, priority } = parseEntry(v);
+    const { title, tags, names, priority, date } = parseEntry(v);
     const ids = [p.id, ...idsFor(names).filter(id => id !== p.id)].slice(0, PEOPLE_MAX);
-    store.add({ title, tags, people: ids, toHour: false, priority });
+    store.add({ title, tags, people: ids, toHour: false, priority, date });
     $("people-task-new").value = "";
     $("people-task-btn").disabled = true;
   });
@@ -4249,8 +4326,9 @@
     // A pasted block of text stays one line.
     title.onpaste = (e) => { e.preventDefault(); document.execCommand("insertText", false, oneLine(e.clipboardData.getData("text/plain"))); };
     title.onblur = () => {
-      const v = oneLine(title.innerText).slice(0, 500);
-      if (v && v !== n.note) store.setMany([[id, { ...doc, note: v }]]);
+      const { rest, date } = pullDate(oneLine(title.innerText));
+      const v = oneLine(rest).slice(0, 500);
+      if (v && (v !== n.note || date)) store.setMany([[id, { ...doc, note: v, ...(date ? { date } : {}) }]]);
       else { showTitle(title, n.note); renderNotes(); }   // empty or unchanged: back as it was, plus anything that arrived meanwhile
     };
     li.querySelector(".del").onclick = () => {
@@ -4269,10 +4347,12 @@
   });
   $("notes-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    const text = oneLine($("note-input").value);
+    const { rest, date: typed } = pullDate(oneLine($("note-input").value));
+    const text = oneLine(rest), date = typed || noteDate;
     if (!text || !store || !store.setMany) return;
     $("note-input").value = "";
-    store.setMany([["note_" + crypto.randomUUID(), { note: text, createdAt: Date.now(), ...(noteDate ? { date: noteDate } : {}) }]]);
+    hideSuggest();
+    store.setMany([["note_" + crypto.randomUUID(), { note: text, createdAt: Date.now(), ...(date ? { date } : {}) }]]);
     noteDate = null;
     renderNoteDate();
     $("note-input").focus();
