@@ -661,6 +661,11 @@
     .check, .tab { transition: background-color 0.15s, border-color 0.15s; }
     .progress-fill { transition: width 0.3s ease; }
   }
+  /* Notes (owner only, /notes): one line each, newest first */
+  .notes-form { display: flex; gap: 8px; }
+  .notes-form input { flex: 1; min-width: 0; font: inherit; font-size: 1.05rem; color: var(--ink); background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  li.task.note { min-height: 48px; }
+  li.task.note .meta { margin-top: -2px; }
 </style>
 
 <div class="wrap">
@@ -680,6 +685,7 @@
       <button class="tab" role="tab" id="nav-tree" data-view="tree" aria-selected="false">Tree</button>
       <button class="tab" role="tab" id="nav-people" data-view="people" aria-selected="false">People</button>
       <button class="tab" role="tab" id="nav-stats" data-view="stats" aria-selected="false">Stats</button>
+      <button class="tab" role="tab" id="nav-notes" data-view="notes" aria-selected="false" hidden>Notes</button>
     </div>
     </div>
   </header>
@@ -932,6 +938,17 @@
     </div>
     <p class="hint" id="best-day"></p>
   </div>
+
+  <div class="view" id="view-notes" hidden>
+    <section class="section" aria-labelledby="notes-title">
+      <div class="section-head"><h2 id="notes-title">Notes</h2><span class="sub" id="notes-count"></span></div>
+      <form class="notes-form" id="notes-form" autocomplete="off">
+        <input id="note-input" type="text" maxlength="500" placeholder="Write a note, then Return" aria-label="New note" enterkeyhint="done">
+        <button class="btn btn-primary" type="submit">Add</button>
+      </form>
+      <ul class="list card-list" id="notes-list" aria-live="polite"></ul>
+    </section>
+  </div>
   <p class="account" id="account" hidden><span id="account-email"></span><button class="act quiet" id="my-name" type="button" hidden></button><button class="act quiet" id="push-toggle" type="button" hidden>Turn on notifications</button><button class="act quiet" id="sign-out" type="button">Sign out</button></p>
 </div>
 
@@ -975,8 +992,10 @@
   let people = [];         // [{id, name}], sorted by name
   let store = null;
   let view = "tasks";
-  // Hosted app: each view has its own address (/tasks, /assigned, /tree, /people, /stats; see selectView).
-  const ROUTES = ["tasks", "assigned", "tree", "people", "stats"];
+  // Hosted app: each view has its own address (/tasks, /assigned, /tree, /people, /stats, /notes; see selectView).
+  const ROUTES = ["tasks", "assigned", "tree", "people", "stats", "notes"];
+  let notes = [];          // owner only: [{id, note, createdAt}], one document each in pt_docs (no title, so never a task)
+  let notesAsked = false;  // the address said /notes before the owner check had answered on this device
   let routeBoot = true;    // until the address has been read: switching views replaces the address, not adds to history
   let routePop = false;    // going back/forward: follow the address, don't write it
   let memberMode = "";     // hosted app, team members only: "simple" or "full" (see the Team members section)
@@ -1265,6 +1284,8 @@
     if (view === "stats") renderStats();
     if (view === "tree") renderTree();
     if (view === "people") renderPeople();
+    if (view === "notes") renderNotes();
+    $("nav-notes").hidden = !isOwner;
     if (sb && me) renderAssigned();
     renderPublish();
   }
@@ -1948,6 +1969,7 @@
   function loadDocs(entries) {
     const get = (id) => { const e = entries.find(x => x.id === id); return e ? e.data : null; };
     tasks = entries.map(e => ({ id: e.id, ...e.data })).filter(t => typeof t.title === "string");
+    notes = entries.filter(e => typeof e.data.note === "string").map(e => ({ id: e.id, ...e.data }));
     const pd = get(PEOPLE_DOC), cd = get(CATS_DOC), tg = get(TAGS_DOC);
     people = sortPeople(cleanPeople(pd ? pd.list : []));
     tagCats = cleanCats(cd ? cd.list : []);
@@ -2262,6 +2284,7 @@
   // ---- Tabs ----
   function selectView(v) {
     if (memberMode === "simple") v = "assigned";   // the Simple version is just the one list
+    if (v === "notes" && !isOwner) v = "tasks";    // Notes are the owner's alone
     view = v;
     document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.view === v)));
     $("view-tasks").hidden = v !== "tasks";
@@ -2269,12 +2292,14 @@
     $("view-tree").hidden = v !== "tree";
     $("view-people").hidden = v !== "people";
     $("view-assigned").hidden = v !== "assigned";
+    $("view-notes").hidden = v !== "notes";
     document.body.classList.toggle("tree", v === "tree" || v === "people");
     applyMode();
     if (v === "stats") renderStats();
     if (v === "tree") renderTree();
     if (v === "people") renderPeople();
     if (v === "assigned") renderAssigned();
+    if (v === "notes") { renderNotes(); if (isDesktop) $("note-input").focus(); }
     if (routed() && ROUTES.includes(view) && !routePop) {
       const want = "/" + view;
       if (location.pathname !== want) history[routeBoot ? "replaceState" : "pushState"](null, "", want + location.search + location.hash);
@@ -4113,6 +4138,68 @@
     new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   }
 
+  // ---- Notes (hosted app, owner only, at /notes): plain one-line notes, separate from tasks ----
+  // Each note is its own document in the owner's pt_docs ({note, createdAt}), so edits on two devices can't overwrite
+  // each other's notes, and it goes through the store's offline queue like everything else.
+  const oneLine = (s) => s.replace(/\s+/g, " ").trim();
+  const noteTime = (ms) => new Date(ms).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  function renderNotes() {
+    const ul = $("notes-list"), active = document.activeElement;
+    if (ul.contains(active) && active.isContentEditable) return;   // don't redraw a note while it's being edited
+    $("notes-count").textContent = notes.length ? `${notes.length} ${notes.length === 1 ? "note" : "notes"}` : "";
+    ul.replaceChildren();
+    if (!notes.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No notes yet. Only you can see this page.";
+      ul.append(li);
+      return;
+    }
+    [...notes].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).forEach(n => ul.append(noteRow(n)));
+  }
+  function noteRow(n) {
+    const { id, ...doc } = n;
+    const li = document.createElement("li");
+    li.className = "task note";
+    li.innerHTML = `<div class="task-body"><div class="title" contenteditable="true" spellcheck="true" role="textbox" aria-label="Note"></div><div class="meta"></div></div>
+      <button class="del" type="button" aria-label="Delete note">${TRASH}</button>`;
+    const title = li.querySelector(".title");
+    showTitle(title, n.note);
+    li.querySelector(".meta").textContent = noteTime(n.createdAt);
+    title.onmousedown = (e) => { if (e.target.closest("a")) e.preventDefault(); };
+    title.onclick = (e) => {
+      const a = e.target.closest("a");
+      if (!a) return;
+      e.preventDefault();
+      window.open(a.href, "_blank", "noopener");
+    };
+    title.onkeydown = (e) => {
+      if (e.isComposing) return;
+      if (e.key === "Enter") { e.preventDefault(); title.blur(); }
+      if (e.key === "Escape") { e.preventDefault(); showTitle(title, n.note); title.blur(); }
+    };
+    // A pasted block of text stays one line.
+    title.onpaste = (e) => { e.preventDefault(); document.execCommand("insertText", false, oneLine(e.clipboardData.getData("text/plain"))); };
+    title.onblur = () => {
+      const v = oneLine(title.innerText).slice(0, 500);
+      if (v && v !== n.note) store.setMany([[id, { ...doc, note: v }]]);
+      else { showTitle(title, n.note); renderNotes(); }   // empty or unchanged: back as it was, plus anything that arrived meanwhile
+    };
+    li.querySelector(".del").onclick = () => {
+      store.remove(id);
+      toast("Note deleted", () => store.setMany([[id, doc]]));
+    };
+    return li;
+  }
+  $("notes-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = oneLine($("note-input").value);
+    if (!text || !store || !store.setMany) return;
+    $("note-input").value = "";
+    store.setMany([["note_" + crypto.randomUUID(), { note: text, createdAt: Date.now() }]]);
+    $("note-input").focus();
+  });
+
   // ---- Write / Type toggle ----
   // Default: Write on tablets (big touch screen, e.g. iPad), Type on phones and desktops. The choice is remembered per device,
   // except on a desktop (mouse or trackpad), which always opens with the add area showing the typing box.
@@ -4262,6 +4349,7 @@
     setStatus("Loading your tasks…");
     store = supaStore(me.id);
     padAllowed();
+    notesAsked = routeFromPath() === "notes";
     ownerCheck();
     listCheck();
     // Open the view the address names (/tree, /people, …); "/" and anything else open Tasks at /tasks.
@@ -4306,6 +4394,8 @@
     try { localStorage.setItem(KEY, isOwner ? "1" : "0"); } catch {}
     if (isOwner && memberMode) { location.reload(); return; }   // was shown a member's version on this device
     if (!isOwner && !memberMode) memberSetup();
+    if (isOwner && notesAsked && view === "tasks") selectView("notes");   // first time on this device: the answer has just come
+    notesAsked = false;
     render();
     if (!isOwner) return;
     sb.from("pt_members").select("email, mode, can_assign").then(({ data: rows }) => {
