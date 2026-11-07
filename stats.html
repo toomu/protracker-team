@@ -661,8 +661,26 @@
     .check, .tab { transition: background-color 0.15s, border-color 0.15s; }
     .progress-fill { transition: width 0.3s ease; }
   }
+  /* Optional date on a task or note: the invisible native date input covers the chip, so a tap opens its picker */
+  .date-wrap { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+  .date-chip {
+    position: relative; display: inline-flex; align-items: center; gap: 4px; overflow: hidden; cursor: pointer;
+    font-size: 0.75rem; font-variant-numeric: tabular-nums; min-height: 28px; min-width: 32px; justify-content: center; padding: 0 7px; border-radius: 999px;
+    color: var(--muted); background: var(--sheet); border: 1px solid var(--line);
+  }
+  .date-chip svg { flex: none; width: 14px; height: 14px; }
+  .date-chip.set { color: var(--accent); font-weight: 700; border-color: color-mix(in srgb, var(--accent) 45%, var(--sheet)); }
+  .date-chip:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .date-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; font-size: 16px; }
+  .date-chip input::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; cursor: pointer; }
+  #composer-date { align-self: center; }
+  @media (max-width: 720px) { #composer-date { flex-basis: 100%; } }
+  .date-clear { flex: none; font: inherit; font-size: 1rem; line-height: 1; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
   /* Notes (owner only, /notes): one line each, newest first. No tab: a double-tap on the logo or name opens it. */
   header h1 { -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+  .note-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+  .notes-form { flex-wrap: wrap; align-items: center; }
+  .notes-form input#note-input { flex: 1 1 12rem; }
   .notes-form { display: flex; gap: 8px; }
   .notes-form input { flex: 1; min-width: 0; font: inherit; font-size: 1.05rem; color: var(--ink); background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
   li.task.note { min-height: 48px; }
@@ -713,6 +731,7 @@
           <textarea id="new-task" rows="1" maxlength="1000" placeholder="Add a task… #tag @name !priority" aria-label="New task" enterkeyhint="done"></textarea>
         </div>
         <div class="composer-actions">
+          <span id="composer-date"></span>
           <button class="btn btn-ghost" id="add-hour" type="button" disabled>Add to Sprint</button>
           <button class="btn btn-primary" id="add-backlog" type="submit" disabled>Add to Repo</button>
         </div>
@@ -944,6 +963,7 @@
       <div class="section-head"><h2 id="notes-title">Notes</h2><span class="sub" id="notes-count"></span></div>
       <form class="notes-form" id="notes-form" autocomplete="off">
         <input id="note-input" type="text" maxlength="500" placeholder="Write a note, then Return" aria-label="New note" enterkeyhint="done">
+        <span id="note-date"></span>
         <button class="btn btn-primary" type="submit">Add</button>
       </form>
       <ul class="list card-list" id="notes-list" aria-live="polite"></ul>
@@ -976,7 +996,7 @@
   const blockEnd = (start) => hourMode === "day" ? new Date(start).setHours(24, 0, 0, 0) : start + HOUR_MS;
 
 
-  // Task: {id, title, tags[], people[], done, createdAt, completedAt|null, hourStart|null, hourAddedAt, inRepo, stagedAt|null, parentId|null, order}
+  // Task: {id, title, tags[], people[], done, createdAt, completedAt|null, hourStart|null, hourAddedAt, inRepo, stagedAt|null, parentId|null, order, date|null ("YYYY-MM-DD")}
   // parentId and order arrange tasks into the Tree view's outlines. people holds person ids.
   // NAMES ON SCREEN ARE SWAPPED (since Oct 24 2026): the code's "backlog" (inBacklog, moveToBacklog, sub "open",
   // #sub-open) is shown as **Stage**, and the code's "stage" (inStage, moveToStage, stagedAt, sub "stage") is shown
@@ -1266,11 +1286,11 @@
     return out;
   }
 
-  function addTask(text, toHour) {
+  function addTask(text, toHour, date) {
     const { title, tags, names, priority } = parseEntry(text);
     if (!title || !store) return false;
     if (toHour && hourFull()) return false;
-    store.add({ title, tags, people: idsFor(names), toHour, priority });
+    store.add({ title, tags, people: idsFor(names), toHour, priority, at: date ? { date } : null });
     return true;
   }
 
@@ -1498,6 +1518,44 @@
     return b;
   }
 
+  // An optional calendar date on a task or note, kept as "YYYY-MM-DD" so it's the same day in every time zone.
+  const CALENDAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>';
+  const dateOf = (x) => typeof x.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x.date) ? x.date : null;
+  function dateText(iso) {
+    const [y, m, d] = iso.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, { month: "short", day: "numeric", ...(y === new Date().getFullYear() ? {} : { year: "numeric" }) });
+  }
+  function dateControl(value, save) {
+    const wrap = document.createElement("span");
+    wrap.className = "date-wrap";
+    const chip = document.createElement("label");
+    chip.className = "date-chip" + (value ? " set" : "");
+    chip.title = value ? "Change the date" : "Add a date";
+    chip.innerHTML = CALENDAR;
+    if (value) chip.append(dateText(value));
+    const inp = document.createElement("input");
+    inp.type = "date";
+    inp.value = value || "";
+    inp.setAttribute("aria-label", value ? `Date ${dateText(value)}. Change the date` : "Add a date");
+    let last = inp.value;
+    const commit = () => { if (inp.value === last) return; last = inp.value; save(inp.value || null); };
+    // iOS sends change while its picker is still open (even on turning the month), and saving would close it, so there it waits for Done.
+    inp.onchange = () => { if (!appleMobile()) commit(); };
+    inp.onblur = commit;
+    chip.append(inp);
+    wrap.append(chip);
+    if (value) {
+      const x = document.createElement("button");
+      x.type = "button";
+      x.className = "date-clear";
+      x.textContent = "×";
+      x.setAttribute("aria-label", `Remove the date ${dateText(value)}`);
+      x.onclick = () => save(null);
+      wrap.append(x);
+    }
+    return wrap;
+  }
+
   function renderTaskTags(box, t) {
     box.replaceChildren();
     if (editingTags === t.id) {
@@ -1613,6 +1671,7 @@
       return;
     }
     box.append(priorityControl(t));
+    box.append(dateControl(dateOf(t), (date) => store.update(t.id, { date })));
     if (t.assignedId) box.append(fromLabel(t));
     peopleOf(t).forEach(id => {
       const p = personById(id);
@@ -2265,12 +2324,20 @@
     // Return adds to the Repo; Shift+Return starts a new line.
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComposer(false); }
   });
+  // The date for the next task typed in the composer; it clears once that task is added.
+  let composerDate = null;
+  function renderComposerDate() {
+    $("composer-date").replaceChildren(dateControl(composerDate, (d) => { composerDate = d; renderComposerDate(); }));
+  }
+  renderComposerDate();
   function submitComposer(toHour) {
     const v = input.value.trim();
     if (!v) return;
     if (toHour && hourFull()) { syncComposer(); return; }
-    if (addTask(v, toHour)) {
+    if (addTask(v, toHour, composerDate)) {
       input.value = "";
+      composerDate = null;
+      renderComposerDate();
       if (!toHour) showRepo();
       autoGrow();
       hideSuggest();
@@ -2830,6 +2897,7 @@
     const ticks = teamTicks(t);
     if (ticks) ticks.forEach(b => li.querySelector(".add-sub").before(b));
     li.querySelector(".add-sub").before(priorityControl(t));
+    li.querySelector(".add-sub").before(dateControl(dateOf(t), (date) => store.update(t.id, { date })));
     const place = placeLabel(t);
     if (place) {
       const p = document.createElement("span");
@@ -4160,11 +4228,12 @@
     const { id, ...doc } = n;
     const li = document.createElement("li");
     li.className = "task note";
-    li.innerHTML = `<div class="task-body"><div class="title" contenteditable="true" spellcheck="true" role="textbox" aria-label="Note"></div><div class="meta"></div></div>
+    li.innerHTML = `<div class="task-body"><div class="title" contenteditable="true" spellcheck="true" role="textbox" aria-label="Note"></div><div class="note-foot"><div class="meta"></div></div></div>
       <button class="del" type="button" aria-label="Delete note">${TRASH}</button>`;
     const title = li.querySelector(".title");
     showTitle(title, n.note);
     li.querySelector(".meta").textContent = noteTime(n.createdAt);
+    li.querySelector(".note-foot").prepend(dateControl(dateOf(n), (date) => store.setMany([[id, { ...doc, date }]])));
     title.onmousedown = (e) => { if (e.target.closest("a")) e.preventDefault(); };
     title.onclick = (e) => {
       const a = e.target.closest("a");
@@ -4203,9 +4272,17 @@
     const text = oneLine($("note-input").value);
     if (!text || !store || !store.setMany) return;
     $("note-input").value = "";
-    store.setMany([["note_" + crypto.randomUUID(), { note: text, createdAt: Date.now() }]]);
+    store.setMany([["note_" + crypto.randomUUID(), { note: text, createdAt: Date.now(), ...(noteDate ? { date: noteDate } : {}) }]]);
+    noteDate = null;
+    renderNoteDate();
     $("note-input").focus();
   });
+  // The date for the next note; it clears once that note is added.
+  let noteDate = null;
+  function renderNoteDate() {
+    $("note-date").replaceChildren(dateControl(noteDate, (d) => { noteDate = d; renderNoteDate(); }));
+  }
+  renderNoteDate();
 
   // ---- Write / Type toggle ----
   // Default: Write on tablets (big touch screen, e.g. iPad), Type on phones and desktops. The choice is remembered per device,
