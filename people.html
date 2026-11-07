@@ -665,26 +665,21 @@
     .check, .tab { transition: background-color 0.15s, border-color 0.15s; }
     .progress-fill { transition: width 0.3s ease; }
   }
-  /* Optional date on a task or note: the invisible native date input covers the chip, so a tap opens its picker */
+  /* A task's or note's date (added by typing !): the invisible native date input covers the chip, so a tap opens its picker */
   .date-wrap { flex: none; display: inline-flex; align-items: center; gap: 2px; }
   .date-chip {
     position: relative; display: inline-flex; align-items: center; gap: 4px; overflow: hidden; cursor: pointer;
-    font-size: 0.75rem; font-variant-numeric: tabular-nums; min-height: 28px; min-width: 32px; justify-content: center; padding: 0 7px; border-radius: 999px;
-    color: var(--muted); background: var(--sheet); border: 1px solid var(--line);
+    font-size: 0.75rem; font-weight: 700; font-variant-numeric: tabular-nums; min-height: 28px; padding: 0 7px; border-radius: 999px;
+    color: var(--accent); background: var(--sheet); border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--sheet));
   }
   .date-chip svg { flex: none; width: 14px; height: 14px; }
-  .date-chip.set { color: var(--accent); font-weight: 700; border-color: color-mix(in srgb, var(--accent) 45%, var(--sheet)); }
   .date-chip:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
   .date-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; opacity: 0; cursor: pointer; font-size: 16px; }
   .date-chip input::-webkit-calendar-picker-indicator { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 0; cursor: pointer; }
-  #composer-date { align-self: center; }
-  @media (max-width: 720px) { #composer-date { flex-basis: 100%; } }
   .date-clear { flex: none; font: inherit; font-size: 1rem; line-height: 1; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
   /* Notes (owner only, /notes): one line each, newest first. No tab: a double-tap on the logo or name opens it. */
   header h1 { -webkit-user-select: none; user-select: none; touch-action: manipulation; }
   .note-foot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
-  .notes-form { flex-wrap: wrap; align-items: center; }
-  .notes-form input#note-input { flex: 1 1 12rem; }
   .notes-form { display: flex; gap: 8px; }
   .notes-form input { flex: 1; min-width: 0; font: inherit; font-size: 1.05rem; color: var(--ink); background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
   li.task.note { min-height: 48px; }
@@ -735,7 +730,6 @@
           <textarea id="new-task" rows="1" maxlength="1000" placeholder="Add a task… #tag @name !priority" aria-label="New task" enterkeyhint="done"></textarea>
         </div>
         <div class="composer-actions">
-          <span id="composer-date"></span>
           <button class="btn btn-ghost" id="add-hour" type="button" disabled>Add to Sprint</button>
           <button class="btn btn-primary" id="add-backlog" type="submit" disabled>Add to Repo</button>
         </div>
@@ -967,7 +961,6 @@
       <div class="section-head"><h2 id="notes-title">Notes</h2><span class="sub" id="notes-count"></span></div>
       <form class="notes-form" id="notes-form" autocomplete="off">
         <input id="note-input" type="text" maxlength="500" placeholder="Write a note, ! for a date" aria-label="New note" enterkeyhint="done">
-        <span id="note-date"></span>
         <button class="btn btn-primary" type="submit">Add</button>
       </form>
       <ul class="list card-list" id="notes-list" aria-live="polite"></ul>
@@ -1304,11 +1297,11 @@
     return out;
   }
 
-  function addTask(text, toHour, date) {
-    const { title, tags, names, priority, date: typed } = parseEntry(text);
+  function addTask(text, toHour) {
+    const { title, tags, names, priority, date } = parseEntry(text);
     if (!title || !store) return false;
     if (toHour && hourFull()) return false;
-    store.add({ title, tags, people: idsFor(names), toHour, priority, date: typed || date });
+    store.add({ title, tags, people: idsFor(names), toHour, priority, date });
     return true;
   }
 
@@ -1465,6 +1458,7 @@
       window.open(a.href, "_blank", "noopener");
     };
     if (t.assignedId) { title.contentEditable = "false"; title.title = "Assigned to you: the person who assigned it sets the title"; return; }
+    title.setDate = (date) => store.update(t.id, { date });   // "Pick a date…" in the ! list
     title.onblur = () => {
       const v = title.innerText.trim();
       if (!v) { showTitle(title, t.title); return; }
@@ -1537,7 +1531,8 @@
     return b;
   }
 
-  // An optional calendar date on a task or note, kept as "YYYY-MM-DD" so it's the same day in every time zone.
+  // A calendar date on a task or note, kept as "YYYY-MM-DD" so it's the same day in every time zone. It's added by
+  // typing ! (see dateSuggestions); once set, this chip shows it and changes or removes it.
   const CALENDAR = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>';
   const dateOf = (x) => typeof x.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(x.date) ? x.date : null;
   function dateText(iso) {
@@ -1548,30 +1543,27 @@
     const wrap = document.createElement("span");
     wrap.className = "date-wrap";
     const chip = document.createElement("label");
-    chip.className = "date-chip" + (value ? " set" : "");
-    chip.title = value ? "Change the date" : "Add a date";
+    chip.className = "date-chip";
+    chip.title = "Change the date";
     chip.innerHTML = CALENDAR;
-    if (value) chip.append(dateText(value));
+    chip.append(dateText(value));
     const inp = document.createElement("input");
     inp.type = "date";
-    inp.value = value || "";
-    inp.setAttribute("aria-label", value ? `Date ${dateText(value)}. Change the date` : "Add a date");
-    let last = inp.value;
+    inp.value = value;
+    inp.setAttribute("aria-label", `Date ${dateText(value)}. Change the date`);
+    let last = value;
     const commit = () => { if (inp.value === last) return; last = inp.value; save(inp.value || null); };
     // iOS sends change while its picker is still open (even on turning the month), and saving would close it, so there it waits for Done.
     inp.onchange = () => { if (!appleMobile()) commit(); };
     inp.onblur = commit;
     chip.append(inp);
-    wrap.append(chip);
-    if (value) {
-      const x = document.createElement("button");
-      x.type = "button";
-      x.className = "date-clear";
-      x.textContent = "×";
-      x.setAttribute("aria-label", `Remove the date ${dateText(value)}`);
-      x.onclick = () => save(null);
-      wrap.append(x);
-    }
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "date-clear";
+    x.textContent = "×";
+    x.setAttribute("aria-label", `Remove the date ${dateText(value)}`);
+    x.onclick = () => save(null);
+    wrap.append(chip, x);
     return wrap;
   }
 
@@ -1690,7 +1682,7 @@
       return;
     }
     box.append(priorityControl(t));
-    box.append(dateControl(dateOf(t), (date) => store.update(t.id, { date })));
+    if (dateOf(t)) box.append(dateControl(dateOf(t), (date) => store.update(t.id, { date })));
     if (t.assignedId) box.append(fromLabel(t));
     peopleOf(t).forEach(id => {
       const p = personById(id);
@@ -2239,9 +2231,8 @@
     return { sign: m[1], q: m[2].toLowerCase() };
   }
   const rank = (key, q) => key.startsWith(q) ? 0 : key.includes(q) ? 1 : -1;
-  // The ! list: the next seven days by name, plus the full picker. An editable title has no picker, because leaving it
-  // saves it, and its row's own date button is right there.
-  function dateSuggestions(a, el) {
+  // The ! list: the next seven days by name, plus the full picker.
+  function dateSuggestions(a) {
     if (/^\d/.test(a.q)) return [];   // !3 is a priority
     const now = new Date();
     const list = [];
@@ -2252,11 +2243,11 @@
       list.push({ key: label.toLowerCase(), text, label, n: dateText(text), isDate: true });
     }
     // Third, so it shows without scrolling the list.
-    if (!el.isContentEditable) list.splice(2, 0, { key: "pick a date", label: "Pick a date…", isDate: true, pick: true });
+    list.splice(2, 0, { key: "pick a date", label: "Pick a date…", isDate: true, pick: true });
     return list.filter(x => rank(x.key, a.q) >= 0).sort((x, y) => rank(x.key, a.q) - rank(y.key, a.q));
   }
-  function findSuggestions(a, el) {
-    if (a.sign === "!") return dateSuggestions(a, el);
+  function findSuggestions(a) {
+    if (a.sign === "!") return dateSuggestions(a);
     let list;
     if (a.sign === "#") list = allTagUsage().map(([tag, n]) => ({ key: tag, text: tag, label: "#" + tag, n, tag }));
     else list = sortPeople(people).map(p => ({ key: personKey(p.name), text: handleOf(p), label: p.name, person: p,
@@ -2274,7 +2265,7 @@
   }
   function renderSuggest(el) {
     const a = activeQuery(el);
-    suggestions = a ? findSuggestions(a, el) : [];
+    suggestions = a ? findSuggestions(a) : [];
     if (!suggestions.length) { hideSuggest(); return; }
     sugField = el;
     if (highlighted >= suggestions.length) highlighted = 0;
@@ -2343,7 +2334,9 @@
       el.dispatchEvent(new Event("input", { bubbles: true }));
     }
   }
-  // The full date picker, for a box where ! was typed. Its choice goes in at the caret as !2026-12-25.
+  // The full date picker, for a box where ! was typed. Its choice goes in at the caret as !2026-12-25. An editable
+  // title can't wait for that, because leaving it saves it (and iOS leaves it to open the picker), so there the title
+  // saves as it stands and the date goes straight onto the task or note, through the title's setDate.
   const sugDate = $("sug-date");
   let pickField = null;
   function openDatePick(el) {
@@ -2360,6 +2353,7 @@
     if (!el || !v) return;
     pickField = null;
     sugDate.value = "";
+    if (el.setDate) { el.blur(); el.setDate(v); return; }
     el.focus();
     insertInto(el, `!${v} `);
   }
@@ -2401,20 +2395,12 @@
     // Return adds to the Repo; Shift+Return starts a new line.
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitComposer(false); }
   });
-  // The date for the next task typed in the composer; it clears once that task is added.
-  let composerDate = null;
-  function renderComposerDate() {
-    $("composer-date").replaceChildren(dateControl(composerDate, (d) => { composerDate = d; renderComposerDate(); }));
-  }
-  renderComposerDate();
   function submitComposer(toHour) {
     const v = input.value.trim();
     if (!v) return;
     if (toHour && hourFull()) { syncComposer(); return; }
-    if (addTask(v, toHour, composerDate)) {
+    if (addTask(v, toHour)) {
       input.value = "";
-      composerDate = null;
-      renderComposerDate();
       if (!toHour) showRepo();
       autoGrow();
       hideSuggest();
@@ -2974,7 +2960,7 @@
     const ticks = teamTicks(t);
     if (ticks) ticks.forEach(b => li.querySelector(".add-sub").before(b));
     li.querySelector(".add-sub").before(priorityControl(t));
-    li.querySelector(".add-sub").before(dateControl(dateOf(t), (date) => store.update(t.id, { date })));
+    if (dateOf(t)) li.querySelector(".add-sub").before(dateControl(dateOf(t), (date) => store.update(t.id, { date })));
     const place = placeLabel(t);
     if (place) {
       const p = document.createElement("span");
@@ -4310,7 +4296,10 @@
     const title = li.querySelector(".title");
     showTitle(title, n.note);
     li.querySelector(".meta").textContent = noteTime(n.createdAt);
-    li.querySelector(".note-foot").prepend(dateControl(dateOf(n), (date) => store.setMany([[id, { ...doc, date }]])));
+    // From the latest copy, because "Pick a date…" saves the note's text just before this.
+    const setDate = (date) => { const { id: _, ...cur } = notes.find(x => x.id === id) || n; store.setMany([[id, { ...cur, date }]]); };
+    title.setDate = setDate;
+    if (dateOf(n)) li.querySelector(".note-foot").prepend(dateControl(dateOf(n), setDate));
     title.onmousedown = (e) => { if (e.target.closest("a")) e.preventDefault(); };
     title.onclick = (e) => {
       const a = e.target.closest("a");
@@ -4347,22 +4336,14 @@
   });
   $("notes-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    const { rest, date: typed } = pullDate(oneLine($("note-input").value));
-    const text = oneLine(rest), date = typed || noteDate;
+    const { rest, date } = pullDate(oneLine($("note-input").value));
+    const text = oneLine(rest);
     if (!text || !store || !store.setMany) return;
     $("note-input").value = "";
     hideSuggest();
     store.setMany([["note_" + crypto.randomUUID(), { note: text, createdAt: Date.now(), ...(date ? { date } : {}) }]]);
-    noteDate = null;
-    renderNoteDate();
     $("note-input").focus();
   });
-  // The date for the next note; it clears once that note is added.
-  let noteDate = null;
-  function renderNoteDate() {
-    $("note-date").replaceChildren(dateControl(noteDate, (d) => { noteDate = d; renderNoteDate(); }));
-  }
-  renderNoteDate();
 
   // ---- Write / Type toggle ----
   // Default: Write on tablets (big touch screen, e.g. iPad), Type on phones and desktops. The choice is remembered per device,
