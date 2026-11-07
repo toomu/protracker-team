@@ -661,7 +661,8 @@
     .check, .tab { transition: background-color 0.15s, border-color 0.15s; }
     .progress-fill { transition: width 0.3s ease; }
   }
-  /* Notes (owner only, /notes): one line each, newest first */
+  /* Notes (owner only, /notes): one line each, newest first. No tab: a double-tap on the logo or name opens it. */
+  header h1 { -webkit-user-select: none; user-select: none; touch-action: manipulation; }
   .notes-form { display: flex; gap: 8px; }
   .notes-form input { flex: 1; min-width: 0; font: inherit; font-size: 1.05rem; color: var(--ink); background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
   li.task.note { min-height: 48px; }
@@ -685,7 +686,6 @@
       <button class="tab" role="tab" id="nav-tree" data-view="tree" aria-selected="false">Tree</button>
       <button class="tab" role="tab" id="nav-people" data-view="people" aria-selected="false">People</button>
       <button class="tab" role="tab" id="nav-stats" data-view="stats" aria-selected="false">Stats</button>
-      <button class="tab" role="tab" id="nav-notes" data-view="notes" aria-selected="false" hidden>Notes</button>
     </div>
     </div>
   </header>
@@ -1285,7 +1285,6 @@
     if (view === "tree") renderTree();
     if (view === "people") renderPeople();
     if (view === "notes") renderNotes();
-    $("nav-notes").hidden = !isOwner;
     if (sb && me) renderAssigned();
     renderPublish();
   }
@@ -4191,6 +4190,14 @@
     };
     return li;
   }
+  // There's no Notes tab: the owner opens it with a double-tap on the logo or name in the header. Counted by hand,
+  // because phones don't reliably send dblclick. Does nothing for anyone else.
+  let lastLogoTap = 0;
+  document.querySelector("header h1").addEventListener("click", () => {
+    const now = Date.now(), twice = now - lastLogoTap < 400;
+    lastLogoTap = twice ? 0 : now;
+    if (twice && isOwner && view !== "notes") selectView("notes");
+  });
   $("notes-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const text = oneLine($("note-input").value);
