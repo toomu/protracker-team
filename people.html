@@ -35,6 +35,7 @@
     --font-display: "Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
     --font-body: "Atkinson Hyperlegible", -apple-system, system-ui, sans-serif;
     --radius: 14px;
+    --page-filter: none;   /* saved scribble pages are black on white; dark mode turns them light on dark */
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -50,6 +51,7 @@
       --danger: #f07a7a;
       --bar-muted: #3f5288;
       --tag-0: #8aa6f7; --tag-1: #f0a06a; --tag-2: #6fd1a8; --tag-3: #c99af0; --tag-4: #f08fb6; --tag-5: #d4d27a;
+      --page-filter: invert(0.88) hue-rotate(180deg);
     }
   }
   :root[data-theme="dark"] {
@@ -65,6 +67,7 @@
     --danger: #f07a7a;
     --bar-muted: #3f5288;
     --tag-0: #8aa6f7; --tag-1: #f0a06a; --tag-2: #6fd1a8; --tag-3: #c99af0; --tag-4: #f08fb6; --tag-5: #d4d27a;
+    --page-filter: invert(0.88) hue-rotate(180deg);
   }
 
   html, body { min-height: 100%; }
@@ -107,6 +110,7 @@
     min-height: 40px; padding: 0 16px; border-radius: 9px; cursor: pointer; font-variant-numeric: tabular-nums;
   }
   .tab[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+  @media (max-width: 480px) { .tabs[aria-label="Views"] { gap: 2px; } .tabs[aria-label="Views"] .tab { padding: 0 9px; font-size: 0.9rem; } }   /* five tabs (with the owner's Scribble) on one line */
 
   /* Sections */
   .section { display: grid; gap: 12px; }
@@ -440,7 +444,7 @@
   .pad-tools .btn { width: 48px; min-height: 48px; padding: 0; display: grid; place-items: center; }
   .pad-tools .btn-primary { min-height: 64px; }
   .pad-tools .btn svg { width: 24px; height: 24px; }
-  .pad-tools #pad-clear { margin-top: auto; }
+  .pad-tools #pad-clear, .pad-tools #scribble-clear { margin-top: auto; }
   .pad-input { grid-template-rows: auto auto; gap: 0; align-content: center; min-height: 56px; }
   .pad-tools .pad-input svg { width: 22px; height: 22px; }
   .pad-input .mode-tag { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); line-height: 1; }
@@ -684,6 +688,23 @@
   .notes-form input { flex: 1; min-width: 0; font: inherit; font-size: 1.05rem; color: var(--ink); background: var(--sheet); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
   li.task.note { min-height: 48px; }
   li.task.note .meta { margin-top: -2px; }
+
+  /* Scribble (owner only): a big pad, and the saved pages under it */
+  body.scribble .wrap { max-width: 1100px; }
+  .scribble-wrap { height: calc(100vh - 230px); height: calc(100dvh - 230px); min-height: 380px; }
+  #scribble-canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; display: block; }
+  #scribble-save[aria-busy="true"] svg { animation: pulse 1s ease-in-out infinite; }
+  .scribble-head-tools { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  .pages { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+  .pages > li.empty { color: var(--muted); padding: 8px 2px; }
+  .page { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; display: grid; gap: 10px; }
+  .page-img { display: block; max-width: 100%; max-height: 260px; margin: 0 auto 0 0; border-radius: 8px; filter: var(--page-filter); }
+  .page-text { box-sizing: border-box; width: 100%; min-height: 3em; resize: none; overflow: hidden; font: inherit; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; white-space: pre-wrap; }
+  .page-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+  .page-foot .meta { color: var(--muted); font-size: 0.85rem; margin-right: auto; }
+  .page-foot .state { font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+  .page-foot .state.err { color: var(--danger); font-weight: 400; }
+  .page .act.danger[data-armed] { color: var(--danger); border-color: var(--danger); }
 </style>
 
 <div class="wrap">
@@ -703,6 +724,7 @@
       <button class="tab" role="tab" id="nav-tree" data-view="tree" aria-selected="false">Tree</button>
       <button class="tab" role="tab" id="nav-people" data-view="people" aria-selected="false">People</button>
       <button class="tab" role="tab" id="nav-stats" data-view="stats" aria-selected="false">Stats</button>
+      <button class="tab" role="tab" id="nav-scribble" data-view="scribble" aria-selected="false" hidden>Scribble</button>
     </div>
     </div>
   </header>
@@ -966,6 +988,27 @@
       <ul class="list card-list" id="notes-list" aria-live="polite"></ul>
     </section>
   </div>
+  <div class="view" id="view-scribble" hidden>
+    <section class="section" aria-labelledby="scribble-title">
+      <div class="section-head"><h2 id="scribble-title">Scribble</h2><span class="sub" id="scribble-count"></span></div>
+      <div class="pad scribble-pad">
+        <div class="pad-body">
+          <div class="canvas-wrap scribble-wrap" id="scribble-wrap"><canvas id="scribble-canvas" aria-label="Scribble pad"></canvas></div>
+          <div class="pad-tools">
+            <button class="btn btn-primary" id="scribble-save" type="button" disabled aria-label="Save this page" title="Save this page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg></button>
+            <button class="btn btn-ghost" id="scribble-undo" type="button" disabled aria-label="Undo last stroke" title="Undo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+            <button class="btn btn-ghost pad-input" id="scribble-input" type="button" aria-label="Drawing with Apple Pencil only. Tap to draw with your finger" title="Pencil mode"><svg class="ic-pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l4-1 11-11-3-3L5 16l-1 4z"/><path d="M14 7l3 3"/></svg><svg class="ic-hand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11V5a1.5 1.5 0 0 1 3 0v6"/><path d="M12 10V4a1.5 1.5 0 0 1 3 0v7"/><path d="M15 10.5V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-4.8-2.4L3.6 14a1.5 1.5 0 0 1 2.3-1.9L9 15V8a1.5 1.5 0 0 1 0 0"/></svg><span class="mode-tag" id="scribble-input-tag">Pen</span></button>
+            <button class="btn btn-ghost" id="scribble-clear" type="button" disabled aria-label="Clear the pad" title="Clear"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg></button>
+          </div>
+        </div>
+        <div class="pad-foot"><span class="pad-msg" id="scribble-msg">Write anything, then tap the tick: the page is read into text and only the text is kept. Saved pages are listed below.</span></div>
+      </div>
+    </section>
+    <section class="section" aria-labelledby="pages-title">
+      <div class="section-head"><h2 id="pages-title">Saved pages</h2><div class="scribble-head-tools"><button class="act" id="scribble-convert-all" type="button" hidden>Try all again</button></div></div>
+      <ul class="pages" id="scribble-list" aria-live="polite"></ul>
+    </section>
+  </div>
   <p class="account" id="account" hidden><span id="account-email"></span><button class="act quiet" id="my-name" type="button" hidden></button><button class="act quiet" id="push-toggle" type="button" hidden>Turn on notifications</button><button class="act quiet" id="sign-out" type="button">Sign out</button></p>
 </div>
 
@@ -1011,9 +1054,11 @@
   let store = null;
   let view = "tasks";
   // Hosted app: each view has its own address (/tasks, /assigned, /tree, /people, /stats, /notes; see selectView).
-  const ROUTES = ["tasks", "assigned", "tree", "people", "stats", "notes"];
+  const ROUTES = ["tasks", "assigned", "tree", "people", "stats", "notes", "scribble"];
+  const OWNER_VIEWS = ["notes", "scribble"];   // the owner's alone
+  let scribbles = [];      // owner only: [{id, scribble, createdAt}], Scribble pages read into text (pt_docs, like notes)
   let notes = [];          // owner only: [{id, note, createdAt}], one document each in pt_docs (no title, so never a task)
-  let notesAsked = false;  // the address said /notes before the owner check had answered on this device
+  let ownerAsked = null;   // the address said /notes or /scribble before the owner check had answered on this device
   let routeBoot = true;    // until the address has been read: switching views replaces the address, not adds to history
   let routePop = false;    // going back/forward: follow the address, don't write it
   let memberMode = "";     // hosted app, team members only: "simple" or "full" (see the Team members section)
@@ -1316,6 +1361,8 @@
     if (view === "tree") renderTree();
     if (view === "people") renderPeople();
     if (view === "notes") renderNotes();
+    if (view === "scribble") renderScribbles();
+    $("nav-scribble").hidden = !(sb && isOwner && !memberMode);
     if (sb && me) renderAssigned();
     renderPublish();
   }
@@ -2039,6 +2086,7 @@
     const get = (id) => { const e = entries.find(x => x.id === id); return e ? e.data : null; };
     tasks = entries.map(e => ({ id: e.id, ...e.data })).filter(t => typeof t.title === "string");
     notes = entries.filter(e => typeof e.data.note === "string").map(e => ({ id: e.id, ...e.data }));
+    scribbles = entries.filter(e => typeof e.data.scribble === "string").map(e => ({ id: e.id, ...e.data }));
     const pd = get(PEOPLE_DOC), cd = get(CATS_DOC), tg = get(TAGS_DOC);
     people = sortPeople(cleanPeople(pd ? pd.list : []));
     tagCats = cleanCats(cd ? cd.list : []);
@@ -2413,7 +2461,7 @@
   // ---- Tabs ----
   function selectView(v) {
     if (memberMode === "simple") v = "assigned";   // the Simple version is just the one list
-    if (v === "notes" && !isOwner) v = "tasks";    // Notes are the owner's alone
+    if (OWNER_VIEWS.includes(v) && !isOwner) v = "tasks";    // Notes and Scribble are the owner's alone
     view = v;
     document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-selected", String(b.dataset.view === v)));
     $("view-tasks").hidden = v !== "tasks";
@@ -2422,13 +2470,16 @@
     $("view-people").hidden = v !== "people";
     $("view-assigned").hidden = v !== "assigned";
     $("view-notes").hidden = v !== "notes";
+    $("view-scribble").hidden = v !== "scribble";
     document.body.classList.toggle("tree", v === "tree" || v === "people");
+    document.body.classList.toggle("scribble", v === "scribble");
     applyMode();
     if (v === "stats") renderStats();
     if (v === "tree") renderTree();
     if (v === "people") renderPeople();
     if (v === "assigned") renderAssigned();
     if (v === "notes") { renderNotes(); if (isDesktop) $("note-input").focus(); }
+    if (v === "scribble") openScribble();
     if (routed() && ROUTES.includes(view) && !routePop) {
       const want = "/" + view;
       if (location.pathname !== want) history[routeBoot ? "replaceState" : "pushState"](null, "", want + location.search + location.hash);
@@ -3958,40 +4009,42 @@
         + "." + (without.length ? ` Not included (no email): ${without.join(", ")}.` : "");
   }
 
-  // ---- Writing pad: Pencil strokes on a canvas, read into tasks by Claude ----
-  function setupPad(sample) {
-    const canvas = $("pad-canvas"), wrap = $("canvas-wrap"), ctx = canvas.getContext("2d");
-    const undoBtn = $("pad-undo"), clearBtn = $("pad-clear"), convertBtn = $("pad-convert"), msg = $("pad-msg");
-    const review = $("review"), reviewList = $("review-list");
-    let strokes = [];        // [[{x, y, w}, ...], ...] in CSS pixels
-    let current = null, activeId = null, busy = false, fingerHintShown = false;
-    // Pencil mode: only a pen draws, so a resting palm is ignored. Finger mode: fingers draw too.
-    const INPUT_KEY = "protracker.drawInput";
-    let drawInput = (() => { try { return localStorage.getItem(INPUT_KEY); } catch { return null; } })()
+  // ---- Ink: strokes drawn on a canvas, shared by the Tasks writing pad and the Scribble pad ----
+  // Pencil mode: only a pen draws, so a resting palm is ignored. Finger mode: fingers draw too. One choice per device.
+  const INPUT_KEY = "protracker.drawInput";
+  let drawInput = null, inputFlips = 0;
+  const inputBtns = [];
+  function showInput(btn, tag) {
+    btn.dataset.input = drawInput;
+    tag.textContent = drawInput === "pen" ? "Pen" : "Finger";
+    btn.title = drawInput === "pen" ? "Pencil mode" : "Finger mode";
+    btn.setAttribute("aria-label", drawInput === "pen"
+      ? "Drawing with Apple Pencil only. Tap to draw with your finger"
+      : "Drawing with your finger. Tap to draw with Apple Pencil only");
+  }
+  function inputToggle(btn, tag, say) {
+    if (!drawInput) drawInput = (() => { try { return localStorage.getItem(INPUT_KEY); } catch { return null; } })()
       || (defaultMode() === "write" ? "pen" : "touch");
-    const inputBtn = $("pad-input");
-    function applyInput() {
-      inputBtn.dataset.input = drawInput;
-      $("pad-input-tag").textContent = drawInput === "pen" ? "Pen" : "Finger";
-      inputBtn.title = drawInput === "pen" ? "Pencil mode" : "Finger mode";
-      inputBtn.setAttribute("aria-label", drawInput === "pen"
-        ? "Drawing with Apple Pencil only. Tap to draw with your finger"
-        : "Drawing with your finger. Tap to draw with Apple Pencil only");
-    }
-    inputBtn.onclick = () => {
+    inputBtns.push([btn, tag]);
+    showInput(btn, tag);
+    btn.onclick = () => {
       drawInput = drawInput === "pen" ? "touch" : "pen";
+      inputFlips++;
       try { localStorage.setItem(INPUT_KEY, drawInput); } catch {}
-      applyInput();
-      fingerHintShown = false;
-      setMsg(drawInput === "pen"
+      inputBtns.forEach(([b, t]) => showInput(b, t));
+      say(drawInput === "pen"
         ? "Pencil mode: only Apple Pencil draws, so you can rest your hand on the screen."
         : "Finger mode: draw with your finger. Keep your palm off the pad.");
     };
-    applyInput();
-
+  }
+  // blocked(): true while the pad is busy; onFinger(): a finger touched the pad in Pencil mode (once per mode change);
+  // onChange(): a stroke was finished.
+  function inkCanvas(canvas, wrap, { blocked, onFinger, onChange }) {
+    const ctx = canvas.getContext("2d");
+    let strokes = [];        // [[{x, y, w}, ...], ...] in CSS pixels
+    let current = null, activeId = null, hinted = -1;
     const inkColor = () => getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() || "#1b2330";
     const widthFor = (e) => e.pointerType === "pen" ? 1.2 + 3.2 * (e.pressure || 0.5) : 2.6;
-
     function drawStroke(c, pts) {
       if (pts.length === 1) {
         c.beginPath(); c.arc(pts[0].x, pts[0].y, pts[0].w / 2, 0, Math.PI * 2); c.fill(); return;
@@ -4016,26 +4069,17 @@
       canvas.height = Math.round(wrap.clientHeight * dpr);
       redraw();
     }
-    function syncButtons() {
-      const has = strokes.length > 0;
-      undoBtn.disabled = clearBtn.disabled = !has || busy;
-      convertBtn.disabled = !has || busy;
-    }
     function point(e) {
       const r = canvas.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top, w: widthFor(e) };
     }
-
     canvas.addEventListener("pointerdown", (e) => {
       // Pens and mice always draw; fingers only in Finger mode.
       if (e.pointerType === "touch" && drawInput === "pen") {
-        if (!fingerHintShown && !busy) {
-          fingerHintShown = true;
-          setMsg("Pencil mode is on, so fingers don't draw. Tap the Pen button beside the pad to switch to Finger mode.");
-        }
+        if (hinted !== inputFlips && !blocked()) { hinted = inputFlips; onFinger(); }
         return;
       }
-      if (activeId !== null || busy) return;
+      if (activeId !== null || blocked()) return;
       activeId = e.pointerId;
       canvas.setPointerCapture(e.pointerId);
       current = [point(e)];
@@ -4055,7 +4099,7 @@
     const end = (e) => {
       if (e.pointerId !== activeId) return;
       activeId = null; current = null;
-      syncButtons();
+      onChange();
     };
     canvas.addEventListener("pointerup", end);
     canvas.addEventListener("pointercancel", end);
@@ -4064,26 +4108,52 @@
     ["touchstart", "touchmove", "touchend"].forEach(t => canvas.addEventListener(t, block, { passive: false }));
     canvas.addEventListener("contextmenu", block);
     canvas.addEventListener("selectstart", block);
+    resize();
+    new ResizeObserver(resize).observe(wrap);
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
+    new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return {
+      get count() { return strokes.length; },
+      undo() { strokes.pop(); redraw(); },
+      clear() { strokes = []; redraw(); },
+      // Black ink on white, cropped to the writing (with a margin), for Claude to read.
+      exportCanvas() {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        strokes.flat().forEach(p => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+        const pad = 20, scale = 2;
+        const w = Math.max(1, maxX - minX + pad * 2), h = Math.max(1, maxY - minY + pad * 2);
+        const out = document.createElement("canvas");
+        out.width = Math.ceil(w * scale); out.height = Math.ceil(h * scale);
+        const c = out.getContext("2d");
+        c.fillStyle = "#ffffff"; c.fillRect(0, 0, out.width, out.height);
+        c.setTransform(scale, 0, 0, scale, (pad - minX) * scale, (pad - minY) * scale);
+        c.strokeStyle = c.fillStyle = "#000000";
+        c.lineCap = c.lineJoin = "round";
+        strokes.forEach(s => drawStroke(c, s));
+        return out;
+      },
+    };
+  }
 
-    undoBtn.onclick = () => { strokes.pop(); redraw(); syncButtons(); };
-    clearBtn.onclick = () => { strokes = []; redraw(); syncButtons(); };
-
-    // Black ink on white, cropped to the writing, for Claude to read.
-    function exportImage() {
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      strokes.flat().forEach(p => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
-      const pad = 20, scale = 2;
-      const w = Math.max(1, maxX - minX + pad * 2), h = Math.max(1, maxY - minY + pad * 2);
-      const out = document.createElement("canvas");
-      out.width = Math.ceil(w * scale); out.height = Math.ceil(h * scale);
-      const c = out.getContext("2d");
-      c.fillStyle = "#ffffff"; c.fillRect(0, 0, out.width, out.height);
-      c.setTransform(scale, 0, 0, scale, (pad - minX) * scale, (pad - minY) * scale);
-      c.strokeStyle = c.fillStyle = "#000000";
-      c.lineCap = c.lineJoin = "round";
-      strokes.forEach(s => drawStroke(c, s));
-      return new Promise(res => out.toBlob(res, "image/png"));
+  // ---- Writing pad: Pencil strokes on a canvas, read into tasks by Claude ----
+  function setupPad(sample) {
+    const undoBtn = $("pad-undo"), clearBtn = $("pad-clear"), convertBtn = $("pad-convert"), msg = $("pad-msg");
+    const review = $("review"), reviewList = $("review-list");
+    let busy = false;
+    inputToggle($("pad-input"), $("pad-input-tag"), (t) => setMsg(t));
+    const ink = inkCanvas($("pad-canvas"), $("canvas-wrap"), {
+      blocked: () => busy,
+      onFinger: () => setMsg("Pencil mode is on, so fingers don't draw. Tap the Pen button beside the pad to switch to Finger mode."),
+      onChange: () => syncButtons(),
+    });
+    function syncButtons() {
+      const has = ink.count > 0;
+      undoBtn.disabled = clearBtn.disabled = !has || busy;
+      convertBtn.disabled = !has || busy;
     }
+    undoBtn.onclick = () => { ink.undo(); syncButtons(); };
+    clearBtn.onclick = () => { ink.clear(); syncButtons(); };
+    const exportImage = () => new Promise(res => ink.exportCanvas().toBlob(res, "image/png"));
 
     function setMsg(text, isErr) { msg.textContent = text; msg.classList.toggle("err", !!isErr); $("pad-foot").hidden = !text; }
 
@@ -4102,7 +4172,7 @@
     const HIDE = ["not_granted", "sampling_disabled", "not_declared", "capability_disabled", "capability_removed", "images_unavailable"];
 
     convertBtn.onclick = async () => {
-      if (!strokes.length || busy) return;
+      if (!ink.count || busy) return;
       busy = true; syncButtons();
       convertBtn.setAttribute("aria-busy", "true");
       setMsg("Reading your handwriting…");
@@ -4251,7 +4321,7 @@
       });
       review.hidden = true;
       rows = [];
-      strokes = []; redraw(); syncButtons();
+      ink.clear(); syncButtons();
       const n = items.length, plural = (k) => k === 1 ? "1 task" : `${k} tasks`;
       if (!toHour) { setMsg(`Added ${plural(n)} to the Repo.`); showRepo(); }
       else if (toHourCount === n) setMsg(`Added ${plural(n)} to the sprint.`);
@@ -4262,10 +4332,6 @@
 
     padReady = true;
     applyMode();
-    resize();
-    new ResizeObserver(resize).observe(wrap);
-    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redraw);
-    new MutationObserver(redraw).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
   }
 
   // ---- Notes (hosted app, owner only, at /notes): plain one-line notes, separate from tasks ----
@@ -4344,6 +4410,197 @@
     store.setMany([["note_" + crypto.randomUUID(), { note: text, createdAt: Date.now(), ...(date ? { date } : {}) }]]);
     $("note-input").focus();
   });
+
+  // ---- Scribble (hosted app, owner only, at /scribble): a big handwriting pad, kept as text only ----
+  // Saving a page reads it into text at once (the handwriting function, SCRIBBLE_PROMPT); only the text is kept, as
+  // its own pt_docs document like a note: scribble_<uuid> = {scribble, createdAt}. The picture never leaves
+  // the device: until it has been read (offline, or the reading failed) it waits in protracker.scribbles.<uid> and
+  // is read when back online, after the owner check, or on "Try again", then dropped.
+  let scribbleInk = null, scribbleBusy = false;
+  const scribbleErr = {};   // waiting page id → why it couldn't be read
+  const converting = new Set();
+  const SCRIBBLE_PROMPT =
+    "The image is a page of handwriting from an Apple Pencil on a scribble pad: notes, ideas or a draft. " +
+    "Transcribe all of it exactly as written, in reading order, keeping the line breaks and paragraphs. " +
+    "Fix only obvious spelling slips. Write a bulleted or numbered line as '- ' or '1. '. " +
+    "Leave out crossed-out words, scribbles and stray marks, and describe nothing that isn't writing. " +
+    "Reply with only the transcribed text, with no introduction or comments. If there is no readable writing, reply with exactly: (empty)";
+  const SCRIBBLE_ERRORS = {
+    rate_limited: "Too many pages read just now. Try again in a minute.",
+    not_configured: "Handwriting isn't set up: add the ANTHROPIC_API_KEY secret to the Supabase handwriting function.",
+    no_credit: "The Anthropic API account is out of credit (console.anthropic.com → Plans & Billing).",
+    not_granted: "This account can't read handwriting.",
+    image_rejected: "This page couldn't be sent as an image.",
+    empty_completion: "No writing found on this page.",
+  };
+  const waitingKey = () => "protracker.scribbles." + me.id;
+  const waitingPages = () => { if (!me) return []; try { return JSON.parse(localStorage.getItem(waitingKey()) || "[]"); } catch { return []; } };
+  const setWaiting = (list) => { try { localStorage.setItem(waitingKey(), JSON.stringify(list)); return true; } catch { return false; } };
+  const scribbleMsg = (text, isErr) => { $("scribble-msg").textContent = text; $("scribble-msg").classList.toggle("err", !!isErr); };
+
+  function openScribble() {
+    if (!scribbleInk) {
+      inputToggle($("scribble-input"), $("scribble-input-tag"), (t) => scribbleMsg(t));
+      scribbleInk = inkCanvas($("scribble-canvas"), $("scribble-wrap"), {
+        blocked: () => scribbleBusy,
+        onFinger: () => scribbleMsg("Pencil mode is on, so fingers don't draw. Tap the Pen button beside the pad to switch to Finger mode."),
+        onChange: syncScribbleButtons,
+      });
+      syncScribbleButtons();
+    }
+    renderScribbles();
+    readWaiting();
+  }
+  function syncScribbleButtons() {
+    const has = !!(scribbleInk && scribbleInk.count);
+    $("scribble-save").disabled = $("scribble-undo").disabled = $("scribble-clear").disabled = !has || scribbleBusy;
+  }
+  $("scribble-undo").onclick = () => { scribbleInk.undo(); syncScribbleButtons(); };
+  $("scribble-clear").onclick = () => { scribbleInk.clear(); syncScribbleButtons(); };
+
+  $("scribble-save").onclick = () => {
+    if (!scribbleInk || !scribbleInk.count || scribbleBusy || !me || !store || !store.setMany) return;
+    const page = { id: "scribble_" + crypto.randomUUID(), image: scribbleInk.exportCanvas().toDataURL("image/png"), createdAt: Date.now() };
+    if (!setWaiting([...waitingPages(), page])) { scribbleMsg("This device is out of room to hold the page. Connect to the internet and try again.", true); return; }
+    scribbleInk.clear();
+    syncScribbleButtons();
+    scribbleMsg(navigator.onLine === false
+      ? "You're offline: the page is kept on this device and read into text when you're back online."
+      : "Reading the page into text. Write the next one.");
+    renderScribbles();
+    readPage(page.id);
+  };
+
+  // Reads one waiting page into text, saves the text and drops the picture.
+  async function readPage(id) {
+    const p = waitingPages().find(x => x.id === id);
+    if (!p || converting.has(id) || !sb || navigator.onLine === false) return;
+    delete scribbleErr[id];
+    converting.add(id);
+    renderScribbles();
+    try {
+      const { data, error } = await sb.functions.invoke("handwriting", { body: { prompt: SCRIBBLE_PROMPT, image: p.image.split(",")[1] || "", mediaType: "image/png" } });
+      if (error) {
+        let code = "upstream";
+        try { const j = await error.context.json(); if (j && j.error) code = j.error; } catch {}
+        throw { code };
+      }
+      let text = String((data && data.text) || "").trim();
+      if (/^\(empty\)$/i.test(text)) text = "";
+      if (!text) throw { code: "empty_completion" };
+      store.setMany([[id, { scribble: text.slice(0, 20000), createdAt: p.createdAt }]]);
+      setWaiting(waitingPages().filter(x => x.id !== id));
+      if (/^Reading the page/.test($("scribble-msg").textContent)) scribbleMsg("Saved as text. Write the next page.");
+    } catch (e) {
+      scribbleErr[id] = SCRIBBLE_ERRORS[e && e.code] || (navigator.onLine === false ? "" : "Couldn't read this page just now.");
+    } finally {
+      converting.delete(id);
+      renderScribbles();
+    }
+  }
+  // Every waiting page that hasn't failed, one after another (or all of them, when asked again).
+  async function readWaiting(all) {
+    if (!me || !isOwner) return;
+    for (const p of waitingPages()) if (all || !scribbleErr[p.id]) await readPage(p.id);
+  }
+  addEventListener("online", () => readWaiting(true));
+  addEventListener("offline", () => { if (view === "scribble") renderScribbles(); });
+  $("scribble-convert-all").onclick = () => readWaiting(true);
+
+  function renderScribbles() {
+    const ul = $("scribble-list"), active = document.activeElement;
+    if (ul.contains(active) && active.tagName === "TEXTAREA") return;   // don't redraw a page's text while it's being corrected
+    const waiting = waitingPages().map(p => ({ ...p, waiting: true }));
+    const list = [...waiting.filter(w => !scribbles.some(s => s.id === w.id)), ...scribbles].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const stuck = waiting.filter(p => !converting.has(p.id)).length;
+    $("scribble-count").textContent = list.length ? `${list.length} ${list.length === 1 ? "page" : "pages"}${waiting.length ? `, ${waiting.length} not read yet` : ""}` : "";
+    $("scribble-convert-all").hidden = stuck < 2 || navigator.onLine === false;
+    $("scribble-convert-all").textContent = "Try all again";
+    ul.replaceChildren();
+    if (!list.length) {
+      const li = document.createElement("li");
+      li.className = "empty";
+      li.textContent = "No saved pages yet. Only you can see this page.";
+      ul.append(li);
+      return;
+    }
+    list.forEach(p => ul.append(p.waiting ? waitingRow(p) : scribbleRow(p)));
+  }
+  function pageFoot(p, li) {
+    const foot = document.createElement("div");
+    foot.className = "page-foot";
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = noteTime(p.createdAt);
+    foot.append(meta);
+    li.append(foot);
+    return foot;
+  }
+  function footState(foot, text, cls) {
+    const st = document.createElement("span");
+    st.className = "state" + (cls ? " " + cls : "");
+    st.textContent = text;
+    foot.append(st);
+  }
+  function footButton(foot, label, cls, onclick) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "act" + (cls ? " " + cls : "");
+    b.textContent = label;
+    b.onclick = () => onclick(b);
+    foot.append(b);
+    return b;
+  }
+  // A page not read yet: its picture (only on this device) and why it's waiting.
+  function waitingRow(p) {
+    const li = document.createElement("li");
+    li.className = "page waiting";
+    const img = document.createElement("img");
+    img.className = "page-img";
+    img.alt = "Handwritten page, not read yet";
+    img.src = /^data:image\/png;base64,/.test(p.image) ? p.image : "";
+    li.append(img);
+    const foot = pageFoot(p, li);
+    const busy = converting.has(p.id);
+    if (busy) footState(foot, "Reading…");
+    else if (scribbleErr[p.id]) footState(foot, scribbleErr[p.id], "err");
+    else if (navigator.onLine === false) footState(foot, "Kept on this device until you're online");
+    else footState(foot, "Not read yet");
+    if (!busy && navigator.onLine !== false) footButton(foot, "Try again", "", () => readPage(p.id));
+    if (!busy) footButton(foot, "Delete", "quiet danger", (b) => {
+      if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to delete"; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = "Delete"; } }, 3000); return; }
+      setWaiting(waitingPages().filter(x => x.id !== p.id));
+      delete scribbleErr[p.id];
+      renderScribbles();
+    });
+    return li;
+  }
+  // A page that has been read: its text, which can be corrected (saved on leaving the box).
+  function scribbleRow(p) {
+    const { id, ...doc } = p;
+    const li = document.createElement("li");
+    li.className = "page";
+    const ta = document.createElement("textarea");
+    ta.className = "page-text";
+    ta.value = p.scribble;
+    ta.maxLength = 20000;
+    ta.setAttribute("aria-label", "Text of this page (you can correct it)");
+    const fit = () => { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + 2 + "px"; };
+    ta.oninput = fit;
+    requestAnimationFrame(fit);
+    ta.onblur = () => {
+      const v = ta.value.trim();
+      if (v && v !== p.scribble) store.setMany([[id, { ...doc, scribble: v }]]);
+      else renderScribbles();   // empty or unchanged: back as it was
+    };
+    li.append(ta);
+    const foot = pageFoot(p, li);
+    footButton(foot, "Delete", "quiet danger", () => {
+      store.remove(id);
+      toast("Page deleted", () => store.setMany([[id, doc]]));
+    });
+    return li;
+  }
 
   // ---- Write / Type toggle ----
   // Default: Write on tablets (big touch screen, e.g. iPad), Type on phones and desktops. The choice is remembered per device,
@@ -4494,7 +4751,7 @@
     setStatus("Loading your tasks…");
     store = supaStore(me.id);
     padAllowed();
-    notesAsked = routeFromPath() === "notes";
+    ownerAsked = OWNER_VIEWS.includes(routeFromPath()) ? routeFromPath() : null;
     ownerCheck();
     listCheck();
     // Open the view the address names (/tree, /people, …); "/" and anything else open Tasks at /tasks.
@@ -4539,10 +4796,11 @@
     try { localStorage.setItem(KEY, isOwner ? "1" : "0"); } catch {}
     if (isOwner && memberMode) { location.reload(); return; }   // was shown a member's version on this device
     if (!isOwner && !memberMode) memberSetup();
-    if (isOwner && notesAsked && view === "tasks") selectView("notes");   // first time on this device: the answer has just come
-    notesAsked = false;
+    if (isOwner && ownerAsked && view === "tasks") selectView(ownerAsked);   // first time on this device: the answer has just come
+    ownerAsked = null;
     render();
     if (!isOwner) return;
+    readWaiting();   // Scribble pages saved on this device but not read yet
     sb.from("pt_members").select("email, mode, can_assign").then(({ data: rows }) => {
       modes = Object.fromEntries((rows || []).map(r => [r.email, r.mode]));
       assigners = Object.fromEntries((rows || []).map(r => [r.email, !!r.can_assign]));
