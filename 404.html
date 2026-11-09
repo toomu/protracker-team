@@ -2453,10 +2453,13 @@
       autoGrow();
       hideSuggest();
       syncComposer();
+      input.focus();   // ready for the next task, also after tapping a button (which the emptied box then disables)
     }
   }
   $("composer").addEventListener("submit", (e) => { e.preventDefault(); submitComposer(false); });
   $("add-hour").addEventListener("click", () => submitComposer(true));
+  // A mouse click on either button doesn't take the cursor out of the box.
+  ["add-hour", "add-backlog"].forEach(id => $(id).addEventListener("mousedown", (e) => e.preventDefault()));
 
   // ---- Tabs ----
   function selectView(v) {
