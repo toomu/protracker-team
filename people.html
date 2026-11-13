@@ -703,10 +703,20 @@
   .page { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; display: grid; gap: 10px; }
   .page-img { display: block; max-width: 100%; max-height: 260px; margin: 0 auto 0 0; border-radius: 8px; filter: var(--page-filter); }
   .page-text { box-sizing: border-box; width: 100%; min-height: 3em; resize: none; overflow: hidden; font: inherit; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; white-space: pre-wrap; }
+  /* A read page with its picture (kept a day on this device): side by side on wide screens to check the reading. */
+  .page.with-pic .page-img { cursor: zoom-in; }
+  .page.with-pic .page-img.big { max-height: none; width: 100%; cursor: zoom-out; }
+  @media (min-width: 900px) {
+    .page.with-pic { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+    .page.with-pic .page-img { width: 100%; max-height: 70vh; object-fit: contain; object-position: left top; }
+    .page.with-pic .page-img.big { max-height: none; }
+    .page.with-pic .page-foot { grid-column: 1 / -1; }
+  }
   .page-foot { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
   .page-foot .meta { color: var(--muted); font-size: 0.85rem; margin-right: auto; }
   .page-foot .state { font-size: 0.8rem; font-weight: 700; color: var(--muted); }
   .page-foot .state.err { color: var(--danger); font-weight: 400; }
+  .page-foot .state.kept { font-weight: 400; }
   .page .act.danger[data-armed] { color: var(--danger); border-color: var(--danger); }
 </style>
 
@@ -1005,7 +1015,7 @@
             <button class="btn btn-ghost" id="scribble-more" type="button" aria-label="More space: make the page longer" title="More space"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
           </div>
         </div>
-        <div class="pad-foot"><span class="pad-msg" id="scribble-msg">Write anything, then tap the tick: the page is read into text and only the text is kept. Saved pages are listed below.</span></div>
+        <div class="pad-foot"><span class="pad-msg" id="scribble-msg">Write anything, then tap the tick: the page is read into text and the text is kept. The picture stays on this device for a day, beside the text, so you can check the reading.</span></div>
       </div>
     </section>
     <section class="section" aria-labelledby="pages-title">
@@ -4429,7 +4439,8 @@
   // Saving a page reads it into text at once (the handwriting function, SCRIBBLE_PROMPT); only the text is kept, as
   // its own pt_docs document like a note: scribble_<uuid> = {scribble, createdAt}. The picture never leaves
   // the device: until it has been read (offline, or the reading failed) it waits in protracker.scribbles.<uid> and
-  // is read when back online, after the owner check, or on "Try again", then dropped.
+  // is read when back online, after the owner check, or on "Try again". Once read, the picture moves to this device's
+  // IndexedDB for a day (KEEP_PIC_MS, from when the page was written), shown beside the text to check the reading.
   let scribbleInk = null, scribbleBusy = false;
   const scribbleErr = {};   // waiting page id → why it couldn't be read
   const converting = new Set();
@@ -4450,6 +4461,44 @@
   const waitingKey = () => "protracker.scribbles." + me.id;
   const waitingPages = () => { if (!me) return []; try { return JSON.parse(localStorage.getItem(waitingKey()) || "[]"); } catch { return []; } };
   const setWaiting = (list) => { try { localStorage.setItem(waitingKey(), JSON.stringify(list)); return true; } catch { return false; } };
+  // Read pages' pictures: IndexedDB, not localStorage, because pictures are big and localStorage also holds the sync queue.
+  // One database per user (protracker.pics.<uid>), deleted on sign-out. keptPics: page id → {image, createdAt}.
+  const KEEP_PIC_MS = 24 * 3600e3;
+  const keptPics = new Map();
+  let picDbP = null;
+  const picFresh = (k) => k && Date.now() - k.createdAt < KEEP_PIC_MS;
+  function picDb() {
+    if (!picDbP) picDbP = new Promise((res, rej) => {
+      const r = indexedDB.open("protracker.pics." + me.id, 1);
+      r.onupgradeneeded = () => r.result.createObjectStore("pics");
+      r.onsuccess = () => res(r.result);
+      r.onerror = () => rej(r.error);
+    });
+    return picDbP;
+  }
+  async function picTx(mode, fn) {
+    const db = await picDb();
+    return new Promise((res, rej) => {
+      const tx = db.transaction("pics", mode), out = fn(tx.objectStore("pics"));
+      tx.oncomplete = () => res(out && out.result);
+      tx.onerror = () => rej(tx.error);
+    });
+  }
+  function keepPic(id, image, createdAt) {
+    if (Date.now() - createdAt >= KEEP_PIC_MS) return;
+    keptPics.set(id, { image, createdAt });
+    picTx("readwrite", st => st.put({ image, createdAt }, id)).catch(() => {});   // full or blocked: shown until the page reloads
+  }
+  // Loads this device's kept pictures and drops the ones older than a day.
+  async function loadPics() {
+    try {
+      const keys = await picTx("readonly", st => st.getAllKeys()), vals = await picTx("readonly", st => st.getAll());
+      const old = [];
+      keys.forEach((k, i) => picFresh(vals[i]) ? keptPics.set(k, vals[i]) : old.push(k));
+      if (old.length) picTx("readwrite", st => old.forEach(k => st.delete(k))).catch(() => {});
+      renderScribbles();
+    } catch {}
+  }
   const scribbleMsg = (text, isErr) => { $("scribble-msg").textContent = text; $("scribble-msg").classList.toggle("err", !!isErr); };
 
   function openScribble() {
@@ -4465,6 +4514,7 @@
     }
     syncScribbleMore();
     renderScribbles();
+    loadPics();
     readWaiting();
   }
   function syncScribbleButtons() {
@@ -4524,6 +4574,7 @@
       let text = String((data && data.text) || "").trim();
       if (/^\(empty\)$/i.test(text)) text = "";
       if (!text) throw { code: "empty_completion" };
+      keepPic(id, p.image, p.createdAt);
       store.setMany([[id, { scribble: text.slice(0, 20000), createdAt: p.createdAt }]]);
       setWaiting(waitingPages().filter(x => x.id !== id));
       if (/^Reading the page/.test($("scribble-msg").textContent)) scribbleMsg("Saved as text. Write the next page.");
@@ -4616,6 +4667,17 @@
     const { id, ...doc } = p;
     const li = document.createElement("li");
     li.className = "page";
+    const pic = keptPics.get(id);
+    if (picFresh(pic) && /^data:image\/png;base64,/.test(pic.image)) {
+      li.classList.add("with-pic");
+      const img = document.createElement("img");
+      img.className = "page-img";
+      img.alt = "The handwritten page, to compare with its text";
+      img.src = pic.image;
+      img.title = "Tap to enlarge";
+      img.onclick = () => img.classList.toggle("big");
+      li.append(img);
+    }
     const ta = document.createElement("textarea");
     ta.className = "page-text";
     ta.value = p.scribble;
@@ -4631,6 +4693,7 @@
     };
     li.append(ta);
     const foot = pageFoot(p, li);
+    if (li.classList.contains("with-pic")) footState(foot, "Picture kept on this device until " + noteTime(pic.createdAt + KEEP_PIC_MS), "kept");
     footButton(foot, "Delete", "quiet danger", () => {
       store.remove(id);
       toast("Page deleted", () => store.setMany([[id, doc]]));
@@ -4816,6 +4879,7 @@
       Object.keys(localStorage).filter(k => k.endsWith("." + me.id) || /^team\.(cache|queue|admin|tag|person|pushLater|names|publish)\b/.test(k))
         .forEach(k => localStorage.removeItem(k));
       sessionStorage.clear();
+      indexedDB.deleteDatabase("protracker.pics." + me.id);   // Scribble pictures kept for a day
     } catch {}
   }
   // The owner (a row in public.admins) keeps the team lists in sync and sees ticks live; remembered for offline starts.
