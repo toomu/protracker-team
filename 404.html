@@ -702,6 +702,8 @@
   .pages > li.empty { color: var(--muted); padding: 8px 2px; }
   .page { background: var(--sheet); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; display: grid; gap: 10px; }
   .page-img { display: block; max-width: 100%; max-height: 260px; margin: 0 auto 0 0; border-radius: 8px; filter: var(--page-filter); }
+  .page-ph { color: var(--muted); font-size: 0.9rem; padding: 18px 4px; }
+  .page.ink .page-img { cursor: pointer; }
   .page-text { box-sizing: border-box; width: 100%; min-height: 3em; resize: none; overflow: hidden; font: inherit; color: var(--ink); background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; white-space: pre-wrap; }
   /* A read page with its picture (kept a day on this device): side by side on wide screens to check the reading. */
   .page.with-pic .page-img { cursor: zoom-in; }
@@ -1015,7 +1017,7 @@
             <button class="btn btn-ghost" id="scribble-more" type="button" aria-label="More space: make the page longer" title="More space"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
           </div>
         </div>
-        <div class="pad-foot"><span class="pad-msg" id="scribble-msg">Write anything, then tap the tick: the page is read into text and the text is kept. The picture stays on this device for a day, beside the text, so you can check the reading.</span></div>
+        <div class="pad-foot"><span class="pad-msg" id="scribble-msg">Write anything, then tap the tick to save the page as handwriting. Open it again to write more, or read it into text when you're done (then the handwriting is deleted).</span></div>
       </div>
     </section>
     <section class="section" aria-labelledby="pages-title">
@@ -1070,7 +1072,7 @@
   // Hosted app: each view has its own address (/tasks, /assigned, /tree, /people, /stats, /notes; see selectView).
   const ROUTES = ["tasks", "assigned", "tree", "people", "stats", "notes", "scribble"];
   const OWNER_VIEWS = ["notes", "scribble"];   // the owner's alone
-  let scribbles = [];      // owner only: [{id, scribble, createdAt}], Scribble pages read into text (pt_docs, like notes)
+  let scribbles = [];      // owner only: Scribble pages (pt_docs, like notes): {id, scribble, createdAt} read into text, or {id, ink, w, more, createdAt, updatedAt} kept as handwriting
   let notes = [];          // owner only: [{id, note, createdAt}], one document each in pt_docs (no title, so never a task)
   let ownerAsked = null;   // the address said /notes or /scribble before the owner check had answered on this device
   let routeBoot = true;    // until the address has been read: switching views replaces the address, not adds to history
@@ -2100,7 +2102,7 @@
     const get = (id) => { const e = entries.find(x => x.id === id); return e ? e.data : null; };
     tasks = entries.map(e => ({ id: e.id, ...e.data })).filter(t => typeof t.title === "string");
     notes = entries.filter(e => typeof e.data.note === "string").map(e => ({ id: e.id, ...e.data }));
-    scribbles = entries.filter(e => typeof e.data.scribble === "string").map(e => ({ id: e.id, ...e.data }));
+    scribbles = entries.filter(e => typeof e.data.scribble === "string" || typeof e.data.ink === "string").map(e => ({ id: e.id, ...e.data }));
     const pd = get(PEOPLE_DOC), cd = get(CATS_DOC), tg = get(TAGS_DOC);
     people = sortPeople(cleanPeople(pd ? pd.list : []));
     tagCats = cleanCats(cd ? cd.list : []);
@@ -4057,22 +4059,39 @@
   // blocked(): true while the pad is busy; onFinger(): a finger touched the pad in Pencil mode (once per mode change);
   // onChange(): a stroke was finished.
   // scrolls(): true when a finger should scroll the page instead (Pencil mode only).
+  function drawStroke(c, pts) {
+    if (pts.length === 1) {
+      c.beginPath(); c.arc(pts[0].x, pts[0].y, pts[0].w / 2, 0, Math.PI * 2); c.fill(); return;
+    }
+    for (let i = 1; i < pts.length; i++) {
+      const a = pts[i - 1], b = pts[i];
+      c.lineWidth = (a.w + b.w) / 2;
+      c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
+    }
+  }
+  // Black ink on white, cropped to the writing (with a margin): for Claude to read, and Scribble's page previews.
+  function inkImage(strokes, scale) {
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    strokes.flat().forEach(p => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
+    if (minX === Infinity) minX = minY = maxX = maxY = 0;
+    const pad = 20;
+    const w = Math.max(1, maxX - minX + pad * 2), h = Math.max(1, maxY - minY + pad * 2);
+    const out = document.createElement("canvas");
+    out.width = Math.ceil(w * scale); out.height = Math.ceil(h * scale);
+    const c = out.getContext("2d");
+    c.fillStyle = "#ffffff"; c.fillRect(0, 0, out.width, out.height);
+    c.setTransform(scale, 0, 0, scale, (pad - minX) * scale, (pad - minY) * scale);
+    c.strokeStyle = c.fillStyle = "#000000";
+    c.lineCap = c.lineJoin = "round";
+    strokes.forEach(s => drawStroke(c, s));
+    return out;
+  }
   function inkCanvas(canvas, wrap, { blocked, onFinger, onChange, scrolls }) {
     const ctx = canvas.getContext("2d");
     let strokes = [];        // [[{x, y, w}, ...], ...] in CSS pixels
     let current = null, activeId = null, hinted = -1;
     const inkColor = () => getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() || "#1b2330";
     const widthFor = (e) => e.pointerType === "pen" ? 1.2 + 3.2 * (e.pressure || 0.5) : 2.6;
-    function drawStroke(c, pts) {
-      if (pts.length === 1) {
-        c.beginPath(); c.arc(pts[0].x, pts[0].y, pts[0].w / 2, 0, Math.PI * 2); c.fill(); return;
-      }
-      for (let i = 1; i < pts.length; i++) {
-        const a = pts[i - 1], b = pts[i];
-        c.lineWidth = (a.w + b.w) / 2;
-        c.beginPath(); c.moveTo(a.x, a.y); c.lineTo(b.x, b.y); c.stroke();
-      }
-    }
     function redraw() {
       const dpr = window.devicePixelRatio || 1;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -4140,22 +4159,10 @@
       get count() { return strokes.length; },
       undo() { strokes.pop(); redraw(); },
       clear() { strokes = []; redraw(); },
-      // Black ink on white, cropped to the writing (with a margin), for Claude to read.
-      exportCanvas() {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        strokes.flat().forEach(p => { minX = Math.min(minX, p.x); minY = Math.min(minY, p.y); maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y); });
-        const pad = 20, scale = 2;
-        const w = Math.max(1, maxX - minX + pad * 2), h = Math.max(1, maxY - minY + pad * 2);
-        const out = document.createElement("canvas");
-        out.width = Math.ceil(w * scale); out.height = Math.ceil(h * scale);
-        const c = out.getContext("2d");
-        c.fillStyle = "#ffffff"; c.fillRect(0, 0, out.width, out.height);
-        c.setTransform(scale, 0, 0, scale, (pad - minX) * scale, (pad - minY) * scale);
-        c.strokeStyle = c.fillStyle = "#000000";
-        c.lineCap = c.lineJoin = "round";
-        strokes.forEach(s => drawStroke(c, s));
-        return out;
-      },
+      // A copy of the strokes (Scribble saves them), and loading saved ones back to write more.
+      strokes: () => strokes.map(s => s.map(p => ({ ...p }))),
+      load(list) { if (activeId !== null) return; strokes = list.map(s => s.map(p => ({ ...p }))); redraw(); },
+      exportCanvas: () => inkImage(strokes, 2),
     };
   }
 
@@ -4435,14 +4442,17 @@
     $("note-input").focus();
   });
 
-  // ---- Scribble (hosted app, owner only, at /scribble): a big handwriting pad, kept as text only ----
-  // Saving a page reads it into text at once (the handwriting function, SCRIBBLE_PROMPT); only the text is kept, as
-  // its own pt_docs document like a note: scribble_<uuid> = {scribble, createdAt}. The picture never leaves
-  // the device: until it has been read (offline, or the reading failed) it waits in protracker.scribbles.<uid> and
-  // is read when back online, after the owner check, or on "Try again". Once read, the picture moves to this device's
-  // IndexedDB for a day (KEEP_PIC_MS, from when the page was written), shown beside the text to check the reading.
+  // ---- Scribble (hosted app, owner only, at /scribble): a big handwriting pad, pages kept as handwriting ----
+  // The tick saves the page as handwriting: its pen strokes go to this device's IndexedDB at once (inkMem, store "inks")
+  // and then to the private Storage bucket "scribbles" (<uid>/<page id>/<updatedAt>.json.gz, owner only), and the page
+  // is a pt_docs document scribble_<uuid> = {ink: <path>, w, more, createdAt, updatedAt}. "Write more" loads a page's
+  // strokes back into the pad (scaled to this pad's width); the tick then saves over it. "Read into text" sends the
+  // page to the handwriting function (SCRIBBLE_PROMPT); the document becomes {scribble: text, createdAt} and the strokes
+  // are deleted from Storage and the device. Its picture is kept on this device for a day (KEEP_PIC_MS) beside the text,
+  // to check the reading. Pages saved before Nov 15 2026 that were waiting to be read stay in protracker.scribbles.<uid>.
   let scribbleInk = null, scribbleBusy = false;
-  const scribbleErr = {};   // waiting page id → why it couldn't be read
+  let editingPage = null;   // id of the saved page open in the pad
+  const scribbleErr = {};   // page id → why it couldn't be read
   const converting = new Set();
   const SCRIBBLE_PROMPT =
     "The image is a page of handwriting from an Apple Pencil on a scribble pad: notes, ideas or a draft. " +
@@ -4461,25 +4471,30 @@
   const waitingKey = () => "protracker.scribbles." + me.id;
   const waitingPages = () => { if (!me) return []; try { return JSON.parse(localStorage.getItem(waitingKey()) || "[]"); } catch { return []; } };
   const setWaiting = (list) => { try { localStorage.setItem(waitingKey(), JSON.stringify(list)); return true; } catch { return false; } };
-  // Read pages' pictures: IndexedDB, not localStorage, because pictures are big and localStorage also holds the sync queue.
-  // One database per user (protracker.pics.<uid>), deleted on sign-out. keptPics: page id → {image, createdAt}.
+  // IndexedDB, not localStorage, because strokes and pictures are big and localStorage also holds the sync queue.
+  // One database per user (protracker.pics.<uid>, deleted on sign-out): "pics" holds read pages' pictures for a day
+  // (keptPics: page id → {image, createdAt}), "inks" the pages' strokes (inkMem: page id → {strokes, w, more,
+  // createdAt, updatedAt, path}; path is null until that version is in Storage).
   const KEEP_PIC_MS = 24 * 3600e3;
-  const keptPics = new Map();
-  let picDbP = null;
+  const keptPics = new Map(), inkMem = new Map();
+  let picDbP = null, inksLoaded = false;
   const picFresh = (k) => k && Date.now() - k.createdAt < KEEP_PIC_MS;
   function picDb() {
     if (!picDbP) picDbP = new Promise((res, rej) => {
-      const r = indexedDB.open("protracker.pics." + me.id, 1);
-      r.onupgradeneeded = () => r.result.createObjectStore("pics");
+      const r = indexedDB.open("protracker.pics." + me.id, 2);
+      r.onupgradeneeded = () => {
+        if (!r.result.objectStoreNames.contains("pics")) r.result.createObjectStore("pics");
+        if (!r.result.objectStoreNames.contains("inks")) r.result.createObjectStore("inks");
+      };
       r.onsuccess = () => res(r.result);
       r.onerror = () => rej(r.error);
     });
     return picDbP;
   }
-  async function picTx(mode, fn) {
+  async function picTx(mode, fn, name = "pics") {
     const db = await picDb();
     return new Promise((res, rej) => {
-      const tx = db.transaction("pics", mode), out = fn(tx.objectStore("pics"));
+      const tx = db.transaction(name, mode), out = fn(tx.objectStore(name));
       tx.oncomplete = () => res(out && out.result);
       tx.onerror = () => rej(tx.error);
     });
@@ -4489,17 +4504,141 @@
     keptPics.set(id, { image, createdAt });
     picTx("readwrite", st => st.put({ image, createdAt }, id)).catch(() => {});   // full or blocked: shown until the page reloads
   }
-  // Loads this device's kept pictures and drops the ones older than a day.
+  // Loads this device's kept pictures (dropping the ones older than a day) and the pages' strokes.
   async function loadPics() {
     try {
       const keys = await picTx("readonly", st => st.getAllKeys()), vals = await picTx("readonly", st => st.getAll());
       const old = [];
       keys.forEach((k, i) => picFresh(vals[i]) ? keptPics.set(k, vals[i]) : old.push(k));
       if (old.length) picTx("readwrite", st => old.forEach(k => st.delete(k))).catch(() => {});
-      renderScribbles();
     } catch {}
+    try {
+      const keys = await picTx("readonly", st => st.getAllKeys(), "inks"), vals = await picTx("readonly", st => st.getAll(), "inks");
+      keys.forEach((k, i) => { if (!inkMem.has(k)) inkMem.set(k, vals[i]); });
+    } catch {}
+    inksLoaded = true;
+    renderScribbles();
+    syncInks();
   }
+  function putInk(id, rec) {
+    inkMem.set(id, rec);
+    picTx("readwrite", st => st.put(rec, id), "inks").catch(() => {});
+  }
+  function dropInk(id) {
+    inkMem.delete(id);
+    previews.delete(id);
+    picTx("readwrite", st => st.delete(id), "inks").catch(() => {});
+  }
+
+  // Strokes as a file: {v: 1, w, more, s: [[x, y, w, x, y, w, …] in tenths of a pixel, …]}, gzipped where the browser can.
+  const canGzip = typeof CompressionStream === "function" && typeof DecompressionStream === "function";
+  async function packInk(rec) {
+    const s = rec.strokes.map(st => st.flatMap(p => [Math.round(p.x * 10), Math.round(p.y * 10), Math.round(p.w * 10)]));
+    const blob = new Blob([JSON.stringify({ v: 1, w: rec.w, more: rec.more, s })], { type: "application/json" });
+    return canGzip ? new Response(blob.stream().pipeThrough(new CompressionStream("gzip"))).blob() : blob;
+  }
+  async function unpackInk(blob, path) {
+    const text = /\.gz$/.test(path) ? await new Response(blob.stream().pipeThrough(new DecompressionStream("gzip"))).text() : await blob.text();
+    const j = JSON.parse(text);
+    const strokes = (j.s || []).map(a => { const pts = []; for (let i = 0; i + 2 < a.length; i += 3) pts.push({ x: a[i] / 10, y: a[i + 1] / 10, w: a[i + 2] / 10 }); return pts; }).filter(p => p.length);
+    return { strokes, w: j.w || 0, more: j.more || 0 };
+  }
+  const bucket = () => sb.storage.from("scribbles");
+  // Storage files no longer needed (a page read, deleted or saved again), removed when online: protracker.inkTrash.<uid>.
+  const trashKey = () => "protracker.inkTrash." + me.id;
+  const trashList = () => { try { return JSON.parse(localStorage.getItem(trashKey()) || "[]"); } catch { return []; } };
+  function trashInk(paths) {
+    paths = paths.filter(Boolean);
+    if (!paths.length) return;
+    try { localStorage.setItem(trashKey(), JSON.stringify([...new Set([...trashList(), ...paths])])); } catch {}
+    flushTrash();
+  }
+  let trashing = false;
+  async function flushTrash() {
+    const list = trashList();
+    if (trashing || !list.length || !sb || navigator.onLine === false) return;
+    trashing = true;
+    try {
+      const { error } = await bucket().remove(list);
+      if (!error) localStorage.setItem(trashKey(), JSON.stringify(trashList().filter(p => !list.includes(p))));
+    } catch {} finally { trashing = false; }
+  }
+
+  // Sends a page's strokes to Storage, then points its document at them (and drops the version they replace).
+  const uploading = new Set(), uploadErr = {};
+  async function uploadInk(id) {
+    const rec = inkMem.get(id);
+    if (!rec || rec.path || uploading.has(id) || !sb || !me || navigator.onLine === false) return;
+    uploading.add(id);
+    delete uploadErr[id];
+    try {
+      const path = `${me.id}/${id}/${rec.updatedAt}.json${canGzip ? ".gz" : ""}`;
+      const { error } = await bucket().upload(path, await packInk(rec), { upsert: true, contentType: canGzip ? "application/gzip" : "application/json" });
+      if (error) throw error;
+      const now = inkMem.get(id);
+      if (!now || converting.has(id)) { trashInk([path]); return; }   // read or deleted while it was being sent
+      const doc = scribbles.find(s => s.id === id);
+      store.setMany([[id, { ink: path, w: rec.w, more: rec.more, createdAt: rec.createdAt, updatedAt: rec.updatedAt }]]);
+      trashInk([doc && doc.ink !== path ? doc.ink : null]);
+      if (now.updatedAt === rec.updatedAt) putInk(id, { ...now, path });
+      else { uploading.delete(id); uploadInk(id); }   // written on again meanwhile: send the newer version too
+    } catch {
+      uploadErr[id] = Date.now();
+      setTimeout(syncInks, 31e3);
+    } finally {
+      uploading.delete(id);
+      renderScribbles();
+    }
+  }
+  // Sends pages not in Storage yet, and forgets strokes this device no longer needs: pages deleted or read into text
+  // (on any device), or saved again elsewhere (fetched again when shown). Only after a server load, so a fresh
+  // device's empty list isn't mistaken for deletions.
+  function syncInks() {
+    if (!me || !isOwner || !sb || !inksLoaded) return;
+    flushTrash();
+    for (const [id, rec] of inkMem) {
+      if (!rec.path) { if (!(Date.now() - (uploadErr[id] || 0) < 30e3)) uploadInk(id); continue; }   // a failed send waits 30 s
+      if (!store || !store.ready || !store.ready() || editingPage === id) continue;
+      const doc = scribbles.find(s => s.id === id);
+      if (!doc || typeof doc.ink !== "string" || doc.ink !== rec.path) dropInk(id);
+    }
+  }
+  // A saved page's strokes: this device's copy if it is the current version (or not sent yet), else fetched from Storage.
+  const fetching = new Set(), fetchErr = {};
+  function inkOf(p) {
+    const rec = inkMem.get(p.id);
+    if (rec && (!rec.path || !p.ink || rec.path === p.ink)) return rec;
+    if (p.ink && inksLoaded) fetchInk(p);
+    return null;
+  }
+  async function fetchInk(p) {
+    if (fetching.has(p.id) || fetchErr[p.id] || !sb || navigator.onLine === false) return;
+    fetching.add(p.id);
+    try {
+      const { data, error } = await bucket().download(p.ink);
+      if (error) throw error;
+      const ink = await unpackInk(data, p.ink);
+      const cur = scribbles.find(s => s.id === p.id);
+      if (cur && cur.ink === p.ink) putInk(p.id, { ...ink, createdAt: p.createdAt, updatedAt: p.updatedAt || p.createdAt, path: p.ink });
+    } catch {
+      fetchErr[p.id] = true;
+    } finally {
+      fetching.delete(p.id);
+      renderScribbles();
+    }
+  }
+  const previews = new Map();   // page id → {key, url}, so a redraw doesn't repaint every page
+  function previewOf(id, rec) {
+    const key = rec.updatedAt + ":" + rec.strokes.length;
+    const had = previews.get(id);
+    if (had && had.key === key) return had.url;
+    const url = inkImage(rec.strokes, 1).toDataURL("image/png");
+    previews.set(id, { key, url });
+    return url;
+  }
+
   const scribbleMsg = (text, isErr) => { $("scribble-msg").textContent = text; $("scribble-msg").classList.toggle("err", !!isErr); };
+  const SCRIBBLE_HINT = "Write anything, then tap the tick to save the page as handwriting. Open it again to write more, or read it into text when you're done (then the handwriting is deleted).";
 
   function openScribble() {
     if (!scribbleInk) {
@@ -4520,10 +4659,16 @@
   function syncScribbleButtons() {
     const has = !!(scribbleInk && scribbleInk.count);
     $("scribble-save").disabled = $("scribble-undo").disabled = !has || scribbleBusy;
-    $("scribble-clear").disabled = (!has && !scribbleMore) || scribbleBusy;   // Clear also takes a lengthened page back to screen height
+    if (editingPage) $("scribble-save").disabled = scribbleBusy;   // undoing every stroke and saving keeps the page as it was
+    $("scribble-clear").disabled = (!has && !scribbleMore && !editingPage) || scribbleBusy;   // Clear also takes a lengthened page back to screen height
   }
   $("scribble-undo").onclick = () => { scribbleInk.undo(); syncScribbleButtons(); };
-  $("scribble-clear").onclick = () => { if (scribbleInk) scribbleInk.clear(); setScribbleMore(0); syncScribbleButtons(); };
+  $("scribble-clear").onclick = () => {
+    if (scribbleInk) scribbleInk.clear();
+    if (editingPage) { editingPage = null; scribbleMsg("Closed that page without changing it. This is a new page."); renderScribbles(); }
+    setScribbleMore(0);
+    syncScribbleButtons();
+  };
   // + adds half a screen of space below, up to SCRIBBLE_MORE_MAX times. More than that and the page would be shrunk so much
   // to be read that small writing gets misread. A new page starts at screen height again.
   const SCRIBBLE_MORE_MAX = 3;
@@ -4543,21 +4688,77 @@
       : drawInput === "pen" ? "More space added below. Scroll the page with your finger; the Pencil writes." : "More space added below.");
   };
 
+  // The tick: saves the pad as a handwritten page (a new one, or the page that was opened to write more).
   $("scribble-save").onclick = () => {
-    if (!scribbleInk || !scribbleInk.count || scribbleBusy || !me || !store || !store.setMany) return;
-    const page = { id: "scribble_" + crypto.randomUUID(), image: scribbleInk.exportCanvas().toDataURL("image/png"), createdAt: Date.now() };
-    if (!setWaiting([...waitingPages(), page])) { scribbleMsg("This device is out of room to hold the page. Connect to the internet and try again.", true); return; }
+    if (!scribbleInk || scribbleBusy || !me || !store || !store.setMany) return;
+    const id = editingPage || "scribble_" + crypto.randomUUID();
+    const was = editingPage && (inkMem.get(id) || scribbles.find(s => s.id === id));
+    if (!scribbleInk.count && !was) return;
+    if (was && !scribbleInk.count) { scribbleMsg("The page would be empty. Write on it, or delete it from the list below.", true); return; }
+    const now = Date.now();
+    putInk(id, { strokes: scribbleInk.strokes(), w: $("scribble-wrap").clientWidth, more: scribbleMore, createdAt: (was && was.createdAt) || now, updatedAt: now, path: null });
+    editingPage = null;
     scribbleInk.clear();
     setScribbleMore(0);
     syncScribbleButtons();
-    scribbleMsg(navigator.onLine === false
-      ? "You're offline: the page is kept on this device and read into text when you're back online."
-      : "Reading the page into text. Write the next one.");
+    scribbleMsg(was ? "Page saved. Write the next one." : navigator.onLine === false
+      ? "Saved on this device; it goes to your account when you're back online. Write the next one."
+      : "Page saved as handwriting. Write the next one.");
     renderScribbles();
-    readPage(page.id);
+    uploadInk(id);
   };
+  // "Write more": a saved page's strokes back into the pad, scaled to this pad's width.
+  function writeMore(p, rec) {
+    if (editingPage === p.id) return;
+    if (scribbleInk.count) { scribbleMsg("Save or clear what's on the pad first, then open the page.", true); return; }
+    editingPage = p.id;
+    setScribbleMore(Math.min(SCRIBBLE_MORE_MAX, rec.more || 0));
+    const k = rec.w ? $("scribble-wrap").clientWidth / rec.w : 1;
+    const strokes = rec.strokes.map(s => s.map(pt => ({ x: pt.x * k, y: pt.y * k, w: pt.w * Math.min(1.5, Math.max(0.67, k)) })));
+    const lowest = Math.max(0, ...strokes.flat().map(pt => pt.y));
+    while (scribbleMore < SCRIBBLE_MORE_MAX && lowest > $("scribble-wrap").clientHeight - 20) setScribbleMore(scribbleMore + 1);
+    scribbleInk.load(strokes);
+    syncScribbleButtons();
+    scribbleMsg("Writing more on the page from " + noteTime(p.createdAt) + ". Tap the tick to save it, or Clear to leave it as it was.");
+    renderScribbles();
+    $("scribble-wrap").scrollIntoView({ block: "start", behavior: "smooth" });
+  }
 
-  // Reads one waiting page into text, saves the text and drops the picture.
+  // Sends one page's picture to the handwriting function; resolves to the text, or throws {code}.
+  async function readImage(dataUrl) {
+    const { data, error } = await sb.functions.invoke("handwriting", { body: { prompt: SCRIBBLE_PROMPT, image: dataUrl.split(",")[1] || "", mediaType: "image/png" } });
+    if (error) {
+      let code = "upstream";
+      try { const j = await error.context.json(); if (j && j.error) code = j.error; } catch {}
+      throw { code };
+    }
+    let text = String((data && data.text) || "").trim();
+    if (/^\(empty\)$/i.test(text)) text = "";
+    if (!text) throw { code: "empty_completion" };
+    return text.slice(0, 20000);
+  }
+  // "Read into text": the page becomes text and its strokes are deleted (from Storage and this device).
+  async function readInk(p, rec) {
+    if (converting.has(p.id) || editingPage === p.id || !sb || navigator.onLine === false) return;
+    delete scribbleErr[p.id];
+    converting.add(p.id);
+    renderScribbles();
+    try {
+      const image = inkImage(rec.strokes, 2).toDataURL("image/png");
+      const text = await readImage(image);
+      const doc = scribbles.find(s => s.id === p.id);
+      keepPic(p.id, image, p.createdAt);
+      store.setMany([[p.id, { scribble: text, createdAt: p.createdAt }]]);
+      trashInk([doc && doc.ink, rec.path]);
+      dropInk(p.id);
+    } catch (e) {
+      scribbleErr[p.id] = SCRIBBLE_ERRORS[e && e.code] || (navigator.onLine === false ? "" : "Couldn't read this page just now.");
+    } finally {
+      converting.delete(p.id);
+      renderScribbles();
+    }
+  }
+  // Pages saved before Nov 15 2026 as pictures waiting to be read: read one, save the text, drop the picture.
   async function readPage(id) {
     const p = waitingPages().find(x => x.id === id);
     if (!p || converting.has(id) || !sb || navigator.onLine === false) return;
@@ -4565,19 +4766,10 @@
     converting.add(id);
     renderScribbles();
     try {
-      const { data, error } = await sb.functions.invoke("handwriting", { body: { prompt: SCRIBBLE_PROMPT, image: p.image.split(",")[1] || "", mediaType: "image/png" } });
-      if (error) {
-        let code = "upstream";
-        try { const j = await error.context.json(); if (j && j.error) code = j.error; } catch {}
-        throw { code };
-      }
-      let text = String((data && data.text) || "").trim();
-      if (/^\(empty\)$/i.test(text)) text = "";
-      if (!text) throw { code: "empty_completion" };
+      const text = await readImage(p.image);
       keepPic(id, p.image, p.createdAt);
-      store.setMany([[id, { scribble: text.slice(0, 20000), createdAt: p.createdAt }]]);
+      store.setMany([[id, { scribble: text, createdAt: p.createdAt }]]);
       setWaiting(waitingPages().filter(x => x.id !== id));
-      if (/^Reading the page/.test($("scribble-msg").textContent)) scribbleMsg("Saved as text. Write the next page.");
     } catch (e) {
       scribbleErr[id] = SCRIBBLE_ERRORS[e && e.code] || (navigator.onLine === false ? "" : "Couldn't read this page just now.");
     } finally {
@@ -4585,22 +4777,27 @@
       renderScribbles();
     }
   }
-  // Every waiting page that hasn't failed, one after another (or all of them, when asked again).
+  // Every waiting picture that hasn't failed (or all of them, when asked again), and pages not yet in Storage.
   async function readWaiting(all) {
     if (!me || !isOwner) return;
+    if (inksLoaded) syncInks(); else loadPics();   // pages saved offline wait in IndexedDB: load them to send them
     for (const p of waitingPages()) if (all || !scribbleErr[p.id]) await readPage(p.id);
   }
-  addEventListener("online", () => readWaiting(true));
+  addEventListener("online", () => { [fetchErr, uploadErr].forEach(o => Object.keys(o).forEach(k => delete o[k])); readWaiting(true); });
   addEventListener("offline", () => { if (view === "scribble") renderScribbles(); });
   $("scribble-convert-all").onclick = () => readWaiting(true);
 
   function renderScribbles() {
     const ul = $("scribble-list"), active = document.activeElement;
     if (ul.contains(active) && active.tagName === "TEXTAREA") return;   // don't redraw a page's text while it's being corrected
+    if (inksLoaded) syncInks();
     const waiting = waitingPages().map(p => ({ ...p, waiting: true }));
-    const list = [...waiting.filter(w => !scribbles.some(s => s.id === w.id)), ...scribbles].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    const docIds = new Set(scribbles.map(s => s.id));
+    const local = [...inkMem].filter(([id]) => !docIds.has(id)).map(([id, r]) => ({ id, createdAt: r.createdAt, updatedAt: r.updatedAt, local: true }));
+    const list = [...waiting.filter(w => !docIds.has(w.id)), ...local, ...scribbles].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
     const stuck = waiting.filter(p => !converting.has(p.id)).length;
-    $("scribble-count").textContent = list.length ? `${list.length} ${list.length === 1 ? "page" : "pages"}${waiting.length ? `, ${waiting.length} not read yet` : ""}` : "";
+    const unread = waiting.length;
+    $("scribble-count").textContent = list.length ? `${list.length} ${list.length === 1 ? "page" : "pages"}${unread ? `, ${unread} not read yet` : ""}` : "";
     $("scribble-convert-all").hidden = stuck < 2 || navigator.onLine === false;
     $("scribble-convert-all").textContent = "Try all again";
     ul.replaceChildren();
@@ -4611,14 +4808,14 @@
       ul.append(li);
       return;
     }
-    list.forEach(p => ul.append(p.waiting ? waitingRow(p) : scribbleRow(p)));
+    list.forEach(p => ul.append(p.waiting ? waitingRow(p) : typeof p.scribble === "string" ? scribbleRow(p) : inkRow(p)));
   }
   function pageFoot(p, li) {
     const foot = document.createElement("div");
     foot.className = "page-foot";
     const meta = document.createElement("span");
     meta.className = "meta";
-    meta.textContent = noteTime(p.createdAt);
+    meta.textContent = noteTime(p.createdAt) + (p.updatedAt && p.updatedAt - p.createdAt > 60e3 ? " · added to " + noteTime(p.updatedAt) : "");
     foot.append(meta);
     li.append(foot);
     return foot;
@@ -4638,7 +4835,53 @@
     foot.append(b);
     return b;
   }
-  // A page not read yet: its picture (only on this device) and why it's waiting.
+  // Delete, tapped twice.
+  function armedDelete(foot, done) {
+    footButton(foot, "Delete", "quiet danger", (b) => {
+      if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to delete"; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = "Delete"; } }, 3000); return; }
+      done();
+    });
+  }
+  // A handwritten page: its writing, Write more, Read into text, Delete.
+  function inkRow(p) {
+    const li = document.createElement("li");
+    li.className = "page ink";
+    const rec = inkOf(p), open = editingPage === p.id, busy = converting.has(p.id);
+    if (rec) {
+      const img = document.createElement("img");
+      img.className = "page-img";
+      img.alt = "Handwritten page";
+      img.src = previewOf(p.id, rec);
+      img.title = "Tap to write more";
+      img.onclick = () => { if (!busy) writeMore(p, rec); };
+      li.append(img);
+    } else {
+      const ph = document.createElement("div");
+      ph.className = "page-ph";
+      ph.textContent = fetchErr[p.id] ? "Couldn't load this page's handwriting." : navigator.onLine === false ? "This page's handwriting loads when you're online." : "Loading the handwriting…";
+      li.append(ph);
+    }
+    const foot = pageFoot(p, li);
+    if (open) footState(foot, "Open in the pad");
+    else if (busy) footState(foot, "Reading…");
+    else if (scribbleErr[p.id]) footState(foot, scribbleErr[p.id], "err");
+    else if (rec && !rec.path) footState(foot, uploading.has(p.id) ? "Saving…" : navigator.onLine === false || uploadErr[p.id] ? "On this device only for now" : "Saving…");
+    if (!rec && fetchErr[p.id] && navigator.onLine !== false) footButton(foot, "Try again", "", () => { delete fetchErr[p.id]; renderScribbles(); });
+    if (rec && !open && !busy) {
+      footButton(foot, "Write more", "", () => writeMore(p, rec));
+      if (navigator.onLine !== false && sb) footButton(foot, "Read into text", "", () => readInk(p, rec));
+    }
+    if (!busy) armedDelete(foot, () => {
+      if (open) { editingPage = null; scribbleInk.clear(); setScribbleMore(0); scribbleMsg(SCRIBBLE_HINT); }
+      const doc = scribbles.find(s => s.id === p.id);
+      if (doc) store.remove(p.id);
+      trashInk([doc && doc.ink, rec && rec.path]);
+      dropInk(p.id);
+      renderScribbles();
+    });
+    return li;
+  }
+  // A page saved before Nov 15 2026 and not read yet: its picture (only on this device) and why it's waiting.
   function waitingRow(p) {
     const li = document.createElement("li");
     li.className = "page waiting";
@@ -4654,8 +4897,7 @@
     else if (navigator.onLine === false) footState(foot, "Kept on this device until you're online");
     else footState(foot, "Not read yet");
     if (!busy && navigator.onLine !== false) footButton(foot, "Try again", "", () => readPage(p.id));
-    if (!busy) footButton(foot, "Delete", "quiet danger", (b) => {
-      if (!b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Tap again to delete"; setTimeout(() => { if (b.isConnected) { delete b.dataset.armed; b.textContent = "Delete"; } }, 3000); return; }
+    if (!busy) armedDelete(foot, () => {
       setWaiting(waitingPages().filter(x => x.id !== p.id));
       delete scribbleErr[p.id];
       renderScribbles();

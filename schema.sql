@@ -182,3 +182,17 @@ alter policy "read own or admin" on public.team_tasks
 alter policy "change own or admin" on public.team_tasks
   using (public.is_admin() or ((assignee_email = public.my_email() or (created_by = (select auth.uid()) and public.can_assign())) and (select public.pt_allowed_me())))
   with check (public.is_admin() or ((assignee_email = public.my_email() or (created_by = (select auth.uid()) and public.can_assign())) and (select public.pt_allowed_me())));
+-- Scribble pages kept as handwriting (Nov 15 2026): each page's pen strokes are one file in the private bucket
+-- "scribbles", at <user id>/<page id>/<saved at>.json.gz. Only the owner (is_admin), and only their own folder. A page's file is deleted once it has been read into text.
+insert into storage.buckets (id, name, public, file_size_limit)
+values ('scribbles', 'scribbles', false, 5242880)
+on conflict (id) do nothing;
+create policy "scribbles: read own" on storage.objects for select to authenticated
+  using (bucket_id = 'scribbles' and (storage.foldername(name))[1] = (select auth.uid())::text and (select public.is_admin()));
+create policy "scribbles: add own" on storage.objects for insert to authenticated
+  with check (bucket_id = 'scribbles' and (storage.foldername(name))[1] = (select auth.uid())::text and (select public.is_admin()));
+create policy "scribbles: change own" on storage.objects for update to authenticated
+  using (bucket_id = 'scribbles' and (storage.foldername(name))[1] = (select auth.uid())::text and (select public.is_admin()))
+  with check (bucket_id = 'scribbles' and (storage.foldername(name))[1] = (select auth.uid())::text and (select public.is_admin()));
+create policy "scribbles: remove own" on storage.objects for delete to authenticated
+  using (bucket_id = 'scribbles' and (storage.foldername(name))[1] = (select auth.uid())::text and (select public.is_admin()));
