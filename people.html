@@ -2501,7 +2501,9 @@
     if (v === "scribble") openScribble();
     if (routed() && ROUTES.includes(view) && !routePop) {
       const want = "/" + view;
-      if (location.pathname !== want) history[routeBoot ? "replaceState" : "pushState"](null, "", want + location.search + location.hash);
+      // Only the Tree's address carries a #tag; leaving the Tree drops it.
+      const hash = view === "tree" ? treeHash() || location.hash : "";
+      if (location.pathname !== want || location.hash !== hash) history[routeBoot ? "replaceState" : "pushState"](null, "", want + location.search + hash);
     }
   }
   // Only the hosted app has addresses per view (not the claude.ai artifact or a local tasks.html).
@@ -2590,14 +2592,30 @@
   let curCat = null, editingCats = false, catRemoveArmed = null;
   let tagPanelOpen = false, tagDeleteArmed = null;   // the Edit tags panel (rename, delete, add)
   // Shows a tag's tree (tag chips on tasks and Tree rows): leaves a category that doesn't hold the tag, closes the editors.
-  function openTreeTag(tag) {
+  function setTreeTag(tag) {
     const cat = tagCats.find(c => c.id === treeCat);
     if (cat && !cat.tags.includes(tag)) { treeCat = ""; try { localStorage.setItem(TREE_CAT_KEY, ""); } catch {} }
     treeTag = tag;
     try { localStorage.setItem(TREE_TAG_KEY, tag); } catch {}
     editingCats = false; tagPanelOpen = false;
+  }
+  function openTreeTag(tag) {
+    setTreeTag(tag);
     if (view === "tree") renderTree(); else selectView("tree");
   }
+  // Hosted app: the address names the tag being viewed (/tree#funding), so a tag's tree can be linked or bookmarked.
+  // hashTag reads it (not "#publish=…"-style parts); treeHash is what the address should say for the tree shown.
+  const hashTag = () => {
+    const h = location.hash.slice(1);
+    if (!h || h.includes("=")) return null;
+    try { return normTag(decodeURIComponent(h)) || null; } catch { return null; }
+  };
+  const treeHash = () => curTreeTag && curTreeTag === treeTag && curTreeTag[0] !== "\u0000" ? "#" + encodeURIComponent(curTreeTag) : "";
+  addEventListener("hashchange", () => {
+    if (!routed() || !store || routeFromPath() !== "tree") return;
+    const tag = hashTag();
+    if (tag) openTreeTag(tag);   // also tidies the address (#FUNDING → #funding)
+  });
   function cleanCats(list) {
     return Array.isArray(list) ? list.filter(c => c && typeof c.id === "string" && typeof c.name === "string")
       .map(c => ({ id: c.id, name: c.name.trim().slice(0, 40) || "Category", tags: Array.isArray(c.tags) ? [...new Set(c.tags.map(normTag).filter(Boolean))] : [] })) : [];
@@ -2703,7 +2721,8 @@
     // branch: the position of the top-level item this row sits under, which picks the branch's color.
     // Collapsed parts are still walked (shown = false) so Expand all and dragging know every group and task.
     const walk = (list, depth, branch, parent, dp, shown, grouped) => {
-      if (treeSort) list = [...list].sort((a, b) => prioOf(b) - prioOf(a));
+      // Finished tasks sink to the bottom of their level; the rest keep their arranged order (or priority order).
+      list = [...list].sort((a, b) => (!!a.done - !!b.done) || (treeSort ? prioOf(b) - prioOf(a) : 0));
       const items = treeGroup && !grouped ? groupSiblings(list) : list.map(t => ({ t }));
       const keys = [];
       items.forEach((it, i) => {
@@ -2816,6 +2835,10 @@
     const cur = valid(treeTag) ? treeTag : catCount ? CAT_ALL : usage.length ? usage[0][0] : untagged ? NO_TAG : null;
     if (cur !== curTreeTag) { addingUnder = null; subDraft = ""; }
     curTreeTag = cur;
+    // Keep /tree#tag in step with the tag shown, once it's the one asked for (before the tasks load, the address's tag
+    // may not be listed yet, and the address keeps it).
+    if (routed() && view === "tree" && location.pathname === "/tree" && cur === treeTag && location.hash !== treeHash())
+      history.replaceState(null, "", "/tree" + location.search + treeHash());
 
     const side = $("tree-side");
     side.replaceChildren();
@@ -2901,6 +2924,7 @@
       ? "Tasks at the same level that share a tag are grouped under it. Drag as usual: dropping a task into a group gives it that tag, dragging it out takes the tag off, and a group's handle moves all its tasks. Tap Grouped by tag to see the plain outline."
       : "Drag the handle to arrange tasks. Drag up or down to reorder, right to nest a task under the one above, left to move it back out. With a keyboard, focus the handle and use the arrow keys.";
     if (treeSort) $("tree-hint").textContent += " Sorted by priority: higher priority comes first at each level, so dragging only reorders tasks of equal priority. Tap P0–P5 on a task to change it.";
+    $("tree-hint").textContent += " Finished tasks sit at the bottom of their level.";
     $("tree-sub").textContent = curTree.size ? (curTree.size === 1 ? "1 task" : `${curTree.size} tasks`) : "";
 
     // One button opens every branch in this tag, or folds them all back once everything is open.
@@ -5096,6 +5120,8 @@
     ownerCheck();
     listCheck();
     // Open the view the address names (/tree, /people, …); "/" and anything else open Tasks at /tasks.
+    // /tree#funding opens the #funding tag's tree.
+    if (routeFromPath() === "tree" && hashTag()) setTreeTag(hashTag());
     selectView(routeFromPath() || view);
     routeBoot = false;
   }
